@@ -10,6 +10,7 @@
     "build": "turbo run build",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
+    "db:migrate": "ts-node scripts/migrate-all.ts",
     "dev:api": "turbo run start:dev --filter=tickernest-api",
     "dev:mf": "turbo run start:dev --filter=tickernest-mf",
     "dev:intl": "turbo run start:dev --filter=tickernest-intl",
@@ -17,8 +18,13 @@
     "dev:web": "turbo run dev --filter=tickernest-web"
   },
   "devDependencies": {
-    "turbo": "^2.1.0"
+    "@types/pg": "^8.11.0",
+    "pg": "^8.12.0",
+    "ts-node": "^10.9.0",
+    "turbo": "^2.1.0",
+    "typescript": "^5.5.0"
   },
+  "packageManager": "npm@8.19.2",
   "engines": {
     "node": ">=20.9.0",
     "npm": ">=8.0.0"

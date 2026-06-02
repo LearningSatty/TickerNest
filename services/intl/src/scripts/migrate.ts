@@ -1,22 +1,28 @@
 import { Pool } from 'pg';
 
 const DDL = `
+SET search_path TO intl, public;
+
 CREATE SCHEMA IF NOT EXISTS auth;
 
 CREATE OR REPLACE FUNCTION auth.uid() RETURNS UUID AS $$
   SELECT NULLIF(current_setting('request.jwt.claim.sub', true), '')::UUID;
 $$ LANGUAGE SQL STABLE;
 
-CREATE TABLE IF NOT EXISTS app_user (
+-- Shared user table (public schema, idempotent)
+CREATE TABLE IF NOT EXISTS public.app_user (
   id UUID PRIMARY KEY,
   email TEXT NOT NULL,
   display_name TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS us_holding (
+-- Intl schema
+CREATE SCHEMA IF NOT EXISTS intl;
+
+CREATE TABLE IF NOT EXISTS intl.us_holding (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES app_user(id),
+  user_id UUID NOT NULL REFERENCES public.app_user(id),
   ticker TEXT NOT NULL,
   name TEXT,
   sector TEXT,
@@ -29,10 +35,10 @@ CREATE TABLE IF NOT EXISTS us_holding (
   UNIQUE(user_id, ticker, lot_kind, broker_name)
 );
 
-CREATE TABLE IF NOT EXISTS us_transaction (
+CREATE TABLE IF NOT EXISTS intl.us_transaction (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES app_user(id),
-  holding_id UUID NOT NULL REFERENCES us_holding(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES public.app_user(id),
+  holding_id UUID NOT NULL REFERENCES intl.us_holding(id) ON DELETE CASCADE,
   type TEXT NOT NULL CHECK (type IN ('BUY','SELL','VEST','DIVIDEND')),
   qty NUMERIC(20,6) NOT NULL,
   price_usd NUMERIC(20,4) NOT NULL,
@@ -42,9 +48,9 @@ CREATE TABLE IF NOT EXISTS us_transaction (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS espp_config (
+CREATE TABLE IF NOT EXISTS intl.espp_config (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES app_user(id),
+  user_id UUID NOT NULL REFERENCES public.app_user(id),
   company TEXT NOT NULL,
   discount_pct NUMERIC(5,2) NOT NULL DEFAULT 15,
   purchase_frequency TEXT NOT NULL DEFAULT 'QUARTERLY',
@@ -54,7 +60,7 @@ CREATE TABLE IF NOT EXISTS espp_config (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS fx_rate (
+CREATE TABLE IF NOT EXISTS intl.fx_rate (
   pair TEXT NOT NULL,
   date DATE NOT NULL,
   rate NUMERIC(12,4) NOT NULL,
@@ -62,9 +68,9 @@ CREATE TABLE IF NOT EXISTS fx_rate (
   PRIMARY KEY (pair, date)
 );
 
-CREATE TABLE IF NOT EXISTS crypto_holding (
+CREATE TABLE IF NOT EXISTS intl.crypto_holding (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES app_user(id),
+  user_id UUID NOT NULL REFERENCES public.app_user(id),
   coin TEXT NOT NULL,
   name TEXT,
   qty NUMERIC(20,8) NOT NULL DEFAULT 0,
@@ -75,10 +81,10 @@ CREATE TABLE IF NOT EXISTS crypto_holding (
   UNIQUE(user_id, coin, platform)
 );
 
-CREATE TABLE IF NOT EXISTS crypto_transaction (
+CREATE TABLE IF NOT EXISTS intl.crypto_transaction (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES app_user(id),
-  holding_id UUID NOT NULL REFERENCES crypto_holding(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES public.app_user(id),
+  holding_id UUID NOT NULL REFERENCES intl.crypto_holding(id) ON DELETE CASCADE,
   type TEXT NOT NULL CHECK (type IN ('BUY','SELL','SWAP','REWARD','AIRDROP')),
   qty NUMERIC(20,8) NOT NULL,
   price_inr NUMERIC(20,4) NOT NULL,
@@ -87,7 +93,7 @@ CREATE TABLE IF NOT EXISTS crypto_transaction (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS idempotency_record (
+CREATE TABLE IF NOT EXISTS intl.idempotency_record (
   user_id UUID NOT NULL,
   key TEXT NOT NULL,
   record_id TEXT NOT NULL,
@@ -97,48 +103,48 @@ CREATE TABLE IF NOT EXISTS idempotency_record (
 );
 
 -- RLS
-ALTER TABLE us_holding ENABLE ROW LEVEL SECURITY;
+ALTER TABLE intl.us_holding ENABLE ROW LEVEL SECURITY;
 DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'user_us_holding') THEN
-    CREATE POLICY user_us_holding ON us_holding USING (user_id = auth.uid());
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'intl' AND policyname = 'user_us') THEN
+    CREATE POLICY user_us ON intl.us_holding USING (user_id = auth.uid());
   END IF;
 END $$;
 
-ALTER TABLE us_transaction ENABLE ROW LEVEL SECURITY;
+ALTER TABLE intl.us_transaction ENABLE ROW LEVEL SECURITY;
 DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'user_us_tx') THEN
-    CREATE POLICY user_us_tx ON us_transaction USING (user_id = auth.uid());
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'intl' AND policyname = 'user_us_tx') THEN
+    CREATE POLICY user_us_tx ON intl.us_transaction USING (user_id = auth.uid());
   END IF;
 END $$;
 
-ALTER TABLE espp_config ENABLE ROW LEVEL SECURITY;
+ALTER TABLE intl.espp_config ENABLE ROW LEVEL SECURITY;
 DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'user_espp') THEN
-    CREATE POLICY user_espp ON espp_config USING (user_id = auth.uid());
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'intl' AND policyname = 'user_espp') THEN
+    CREATE POLICY user_espp ON intl.espp_config USING (user_id = auth.uid());
   END IF;
 END $$;
 
-ALTER TABLE crypto_holding ENABLE ROW LEVEL SECURITY;
+ALTER TABLE intl.crypto_holding ENABLE ROW LEVEL SECURITY;
 DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'user_crypto_holding') THEN
-    CREATE POLICY user_crypto_holding ON crypto_holding USING (user_id = auth.uid());
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'intl' AND policyname = 'user_crypto') THEN
+    CREATE POLICY user_crypto ON intl.crypto_holding USING (user_id = auth.uid());
   END IF;
 END $$;
 
-ALTER TABLE crypto_transaction ENABLE ROW LEVEL SECURITY;
+ALTER TABLE intl.crypto_transaction ENABLE ROW LEVEL SECURITY;
 DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'user_crypto_tx') THEN
-    CREATE POLICY user_crypto_tx ON crypto_transaction USING (user_id = auth.uid());
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'intl' AND policyname = 'user_crypto_tx') THEN
+    CREATE POLICY user_crypto_tx ON intl.crypto_transaction USING (user_id = auth.uid());
   END IF;
 END $$;
 
 -- Indexes
-CREATE INDEX IF NOT EXISTS idx_us_holding_user ON us_holding(user_id);
-CREATE INDEX IF NOT EXISTS idx_us_tx_holding ON us_transaction(holding_id);
-CREATE INDEX IF NOT EXISTS idx_espp_user ON espp_config(user_id);
-CREATE INDEX IF NOT EXISTS idx_fx_rate_pair ON fx_rate(pair, date DESC);
-CREATE INDEX IF NOT EXISTS idx_crypto_holding_user ON crypto_holding(user_id);
-CREATE INDEX IF NOT EXISTS idx_crypto_tx_holding ON crypto_transaction(holding_id);
+CREATE INDEX IF NOT EXISTS idx_intl_us_user ON intl.us_holding(user_id);
+CREATE INDEX IF NOT EXISTS idx_intl_us_tx_holding ON intl.us_transaction(holding_id);
+CREATE INDEX IF NOT EXISTS idx_intl_espp_user ON intl.espp_config(user_id);
+CREATE INDEX IF NOT EXISTS idx_intl_fx_pair ON intl.fx_rate(pair, date DESC);
+CREATE INDEX IF NOT EXISTS idx_intl_crypto_user ON intl.crypto_holding(user_id);
+CREATE INDEX IF NOT EXISTS idx_intl_crypto_tx_holding ON intl.crypto_transaction(holding_id);
 `;
 
 async function migrate() {
