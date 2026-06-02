@@ -1,0 +1,57 @@
+# Fly.io app config for TickerNest API.
+# Two regions for redundancy + sticky-WS support; primary holds the LISTEN
+# client. Replace `app` with your Fly app name.
+
+app = "tickernest-api"
+primary_region = "bom"  # Mumbai — closest to NSE/BSE for quote latency
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "8080"
+  WEB_ORIGIN = "https://tickernest.app"
+  # Other secrets are set via:  fly secrets set DATABASE_URL=... REDIS_URL=... SUPABASE_JWT_SECRET=...
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false   # WS connections need the machine alive
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+# Sticky WS sessions for Socket.IO — required when scaling beyond 1 instance
+# without the Redis adapter. We start with 1; turn this on when adding more.
+# [http_service.concurrency]
+#   type = "connections"
+#   hard_limit = 200
+#   soft_limit = 150
+
+[[http_service.checks]]
+  interval = "15s"
+  timeout = "5s"
+  grace_period = "10s"
+  method = "get"
+  path = "/healthz"
+
+[[services]]
+  internal_port = 8080
+  protocol = "tcp"
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+    force_https = true
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+[deploy]
+  release_command = "node dist/scripts/migrate.js"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 512

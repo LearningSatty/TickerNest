@@ -1,0 +1,91 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Theme tokens.  All colour values are stored as `R G B` triplets so Tailwind's
+ * `<alpha-value>` placeholder (set in tailwind.config.js) can apply opacities
+ * via classes like `bg-bg-soft/60`.  The default selector is dark; the
+ * `[data-theme="light"]` selector is applied on the root <html> element by
+ * ThemeProvider.
+ */
+:root {
+  --c-bg:        11  13  16;     /* #0b0d10 */
+  --c-bg-soft:   19  22  27;     /* #13161b */
+  --c-bg-lift:   26  31  39;     /* #1a1f27 */
+  --c-ink:       231 234 240;    /* #e7eaf0 */
+  --c-ink-muted: 154 163 178;    /* #9aa3b2 */
+  --c-ink-dim:   107 114 128;    /* #6b7280 */
+  --c-accent:    124  92 255;    /* #7c5cff */
+  --c-accent-soft: 59 44 147;    /* #3b2c93 */
+  --c-gain:       34 197  94;    /* #22c55e */
+  --c-loss:      239  68  68;    /* #ef4444 */
+  --c-flat:      148 163 184;    /* #94a3b8 */
+  --c-line:       31  36  44;    /* #1f242c */
+  /* Page-level radial gradient — also themed. */
+  --page-grad-from: #14171d;
+  --page-grad-to:   #0b0d10;
+}
+
+[data-theme='light'] {
+  --c-bg:        248 250 252;    /* #f8fafc — slate-50 */
+  --c-bg-soft:   241 245 249;    /* #f1f5f9 — slate-100 */
+  --c-bg-lift:   255 255 255;    /* #ffffff */
+  --c-ink:        15  23  42;    /* #0f172a — slate-900 */
+  --c-ink-muted:  71  85 105;    /* #475569 — slate-600 */
+  --c-ink-dim:   148 163 184;    /* #94a3b8 — slate-400 */
+  --c-accent:     99  76 224;    /* #634ce0 — slightly darker for contrast on white */
+  --c-accent-soft: 224 218 255;  /* #e0daff */
+  --c-gain:       21 128  61;    /* #15803d — green-700 */
+  --c-loss:      185  28  28;    /* #b91c1c — red-700 */
+  --c-flat:      100 116 139;    /* #64748b — slate-500 */
+  --c-line:      226 232 240;    /* #e2e8f0 — slate-200 */
+  --page-grad-from: #ffffff;
+  --page-grad-to:   #eff3f8;
+}
+
+@layer base {
+  html, body, #root { height: 100%; width: 100%; overflow: hidden; }
+  body {
+    background: radial-gradient(
+      ellipse at top,
+      var(--page-grad-from) 0%,
+      var(--page-grad-to) 60%
+    );
+    color: rgb(var(--c-ink));
+  }
+  /* Tabular numbers everywhere — pivot rows must align. */
+  .num { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum'; }
+}
+
+@layer utilities {
+  /* Hide scrollbars while keeping overflow scrollable.  Used by MarketStrip
+   * so the user only scrolls via the chevron buttons — never via page-level
+   * horizontal scroll. */
+  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+}
+
+@layer components {
+  .card {
+    @apply rounded-xl border border-line/80 bg-bg-soft/60 backdrop-blur-sm;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-2xs font-medium;
+  }
+  .chip-gain { @apply bg-gain/10 text-gain; }
+  .chip-loss { @apply bg-loss/10 text-loss; }
+  .chip-flat { @apply bg-flat/10 text-flat; }
+  .table-pivot {
+    @apply num text-sm;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+  .table-pivot th, .table-pivot td {
+    @apply border-b border-line/60 px-3 py-2 whitespace-nowrap;
+  }
+  .table-pivot thead th {
+    @apply sticky top-0 z-10 bg-bg-soft text-ink-muted text-2xs font-medium uppercase tracking-wide;
+  }
+  .table-pivot tbody tr:hover { @apply bg-line/40; }
+}

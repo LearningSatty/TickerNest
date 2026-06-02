@@ -1,0 +1,26 @@
+{
+  "name": "tickernest",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "services/*",
+    "web"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "dev:api": "turbo run start:dev --filter=tickernest-api",
+    "dev:mf": "turbo run start:dev --filter=tickernest-mf",
+    "dev:intl": "turbo run start:dev --filter=tickernest-intl",
+    "dev:physical": "turbo run start:dev --filter=tickernest-physical",
+    "dev:web": "turbo run dev --filter=tickernest-web"
+  },
+  "devDependencies": {
+    "turbo": "^2.1.0"
+  },
+  "engines": {
+    "node": ">=20.9.0",
+    "npm": ">=8.0.0"
+  }
+}

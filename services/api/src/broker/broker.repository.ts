@@ -1,0 +1,121 @@
+import { Injectable } from '@nestjs/common';
+import { DbService } from '../common/db.service';
+
+export interface BrokerRow {
+  id: string;
+  user_id: string;
+  name: string;
+  display_name: string;
+  currency: 'INR' | 'USD';
+  sort_order: number;
+  csv_profile_key: string;
+}
+
+export interface CreateBrokerInput {
+  name: string;
+  displayName: string;
+  currency: 'INR' | 'USD';
+  csvProfileKey: string;
+}
+
+@Injectable()
+export class BrokerRepository {
+  constructor(private readonly db: DbService) {}
+
+  async list(userId: string): Promise<BrokerRow[]> {
+    return this.db.withUserTx(userId, async (tx) => {
+      const r = await tx.query<BrokerRow>(
+        `SELECT id, user_id, name, display_name, currency, sort_order, csv_profile_key
+           FROM broker
+          WHERE user_id = $1 AND deleted_at IS NULL
+          ORDER BY sort_order, display_name`,
+        [userId],
+      );
+      return r.rows;
+    });
+  }
+
+  async create(userId: string, input: CreateBrokerInput): Promise<BrokerRow> {
+    return this.db.withUserTx(userId, async (tx) => {
+      const max = await tx.query<{ max: number | null }>(
+        `SELECT COALESCE(MAX(sort_order), 0) AS max FROM broker WHERE user_id = $1`,
+        [userId],
+      );
+      const nextOrder = (max.rows[0]!.max ?? 0) + 1;
+      const r = await tx.query<BrokerRow>(
+        `INSERT INTO broker
+            (user_id, name, display_name, currency, sort_order, csv_profile_key)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id, user_id, name, display_name, currency, sort_order, csv_profile_key`,
+        [
+          userId,
+          input.name,
+          input.displayName,
+          input.currency,
+          nextOrder,
+          input.csvProfileKey,
+        ],
+      );
+      return r.rows[0]!;
+    });
+  }
+
+  async update(
+    userId: string,
+    id: string,
+    patch: {
+      displayName?: string | undefined;
+      currency?: 'INR' | 'USD' | undefined;
+      csvProfileKey?: string | undefined;
+      sortOrder?: number | undefined;
+    },
+  ): Promise<BrokerRow | null> {
+    return this.db.withUserTx(userId, async (tx) => {
+      const fields: string[] = [];
+      const params: unknown[] = [userId, id];
+      let i = 3;
+      if (patch.displayName !== undefined) { fields.push(`display_name = $${i++}`); params.push(patch.displayName); }
+      if (patch.currency !== undefined)    { fields.push(`currency = $${i++}`); params.push(patch.currency); }
+      if (patch.csvProfileKey !== undefined){ fields.push(`csv_profile_key = $${i++}`); params.push(patch.csvProfileKey); }
+      if (patch.sortOrder !== undefined)   { fields.push(`sort_order = $${i++}`); params.push(patch.sortOrder); }
+      if (fields.length === 0) {
+        const r = await tx.query<BrokerRow>(
+          `SELECT id, user_id, name, display_name, currency, sort_order, csv_profile_key
+             FROM broker WHERE user_id = $1 AND id = $2 AND deleted_at IS NULL`,
+          [userId, id],
+        );
+        return r.rowCount === 0 ? null : r.rows[0]!;
+      }
+      const r = await tx.query<BrokerRow>(
+        `UPDATE broker SET ${fields.join(', ')}
+          WHERE user_id = $1 AND id = $2 AND deleted_at IS NULL
+       RETURNING id, user_id, name, display_name, currency, sort_order, csv_profile_key`,
+        params,
+      );
+      return r.rowCount === 0 ? null : r.rows[0]!;
+    });
+  }
+
+  async softDelete(userId: string, id: string): Promise<boolean> {
+    return this.db.withUserTx(userId, async (tx) => {
+      const r = await tx.query(
+        `UPDATE broker SET deleted_at = NOW()
+          WHERE user_id = $1 AND id = $2 AND deleted_at IS NULL`,
+        [userId, id],
+      );
+      return (r.rowCount ?? 0) > 0;
+    });
+  }
+
+  async findByName(userId: string, name: string): Promise<BrokerRow | null> {
+    return this.db.withUserTx(userId, async (tx) => {
+      const r = await tx.query<BrokerRow>(
+        `SELECT id, user_id, name, display_name, currency, sort_order, csv_profile_key
+           FROM broker
+          WHERE user_id = $1 AND name = $2 AND deleted_at IS NULL`,
+        [userId, name],
+      );
+      return r.rowCount === 0 ? null : r.rows[0]!;
+    });
+  }
+}

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Material3 dark theme; tint set in Compose. -->
+    <style name="Theme.TickerNest" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:statusBarColor">#0b0d10</item>
+        <item name="android:windowBackground">#0b0d10</item>
+    </style>
+</resources>
