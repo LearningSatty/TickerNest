@@ -25,6 +25,7 @@ import { cn } from '@/lib/cn';
 import { supabase } from '@/lib/supabase';
 import MarketStrip from '@/components/MarketStrip';
 import GlobalStockSearch from '@/components/GlobalStockSearch';
+import { ProductNav } from '@/components/ProductNav';
 
 const COLLAPSE_KEY = 'tn:nav-collapsed';
 
@@ -191,6 +192,7 @@ export default function AppShell() {
           </div>
         </aside>
         <div className="flex flex-col min-w-0 bg-bg-lift overflow-hidden">
+          <ProductNav />
           {!hideSearch && <GlobalStockSearch />}
           <main className="flex-1 overflow-auto min-w-0">
             <Outlet />

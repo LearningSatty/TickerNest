@@ -20,6 +20,9 @@ import StockDetail from '@/pages/StockDetail';
 import SoldShares from '@/pages/SoldShares';
 import ExcelOnboard from '@/pages/ExcelOnboard';
 import Settings from '@/pages/Settings';
+import MfPortfolio from '@/pages/mf/MfPortfolio';
+import UsHoldings from '@/pages/investments/UsHoldings';
+import AssetsList from '@/pages/assets/AssetsList';
 import { useAuth } from '@/hooks/useAuth';
 import { ThemeProvider, bootTheme } from '@/lib/theme';
 
@@ -66,6 +69,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
               <Route path="stock/:ticker" element={<StockDetail />} />
               {/* Backwards compat: old singular path still works. */}
               <Route path="watchlist/:id" element={<Watchlist />} />
+              <Route path="mf" element={<MfPortfolio />} />
+              <Route path="investments" element={<UsHoldings />} />
+              <Route path="assets" element={<AssetsList />} />
               <Route path="sold" element={<SoldShares />} />
               <Route path="import/excel" element={<ExcelOnboard />} />
               <Route path="settings" element={<Settings />} />

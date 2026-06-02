@@ -25,6 +25,8 @@ import { MarketController } from './market/market.controller';
 import { SoldShareController } from './sold-share/sold-share.controller';
 import { WatchlistController } from './watchlist/watchlist.controller';
 import { HealthController } from './health/health.controller';
+import { GatewayController } from './gateway/gateway.controller';
+import { GatewayService } from './gateway/gateway.service';
 import { QuoteModule } from './quote/quote.module';
 import { RealtimeModule } from './realtime/realtime.module';
 
@@ -42,6 +44,7 @@ import { RealtimeModule } from './realtime/realtime.module';
     SoldShareController,
     WatchlistController,
     HealthController,
+    GatewayController,
   ],
   providers: [
     JwksService,
@@ -58,6 +61,7 @@ import { RealtimeModule } from './realtime/realtime.module';
     CsvImportService,
     ExcelImportService,
     PortfolioService,
+    GatewayService,
   ],
 })
 export class AppModule implements NestModule {
