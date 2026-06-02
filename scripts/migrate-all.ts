@@ -1,12 +1,8 @@
 import { Pool } from 'pg';
 
 const DDL = `
--- Shared auth infrastructure
-CREATE SCHEMA IF NOT EXISTS auth;
-
-CREATE OR REPLACE FUNCTION auth.uid() RETURNS UUID AS $$
-  SELECT NULLIF(current_setting('request.jwt.claim.sub', true), '')::UUID;
-$$ LANGUAGE SQL STABLE;
+-- NOTE: On Supabase, auth.uid() already exists (provided by Supabase Auth).
+-- We do NOT create the auth schema or the uid() function.
 
 -- Shared user table (public schema)
 CREATE TABLE IF NOT EXISTS public.app_user (
