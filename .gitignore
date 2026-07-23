@@ -1,7 +1,38 @@
+# Dependencies
 node_modules/
+
+# Build output
 dist/
-.env
-.env.local
+build/
+**/build/
 *.tsbuildinfo
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Turborepo
 .turbo/
+
+# Test coverage
 coverage/
+
+# OS junk
+.DS_Store
+
+# Android / Gradle
+.gradle/
+**/.gradle/
+local.properties
+*.class
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.keystore
+
+# IDE
+.idea/
+*.iml
