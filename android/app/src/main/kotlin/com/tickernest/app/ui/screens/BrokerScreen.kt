@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -24,21 +25,32 @@ import com.tickernest.core.formatQty
 import com.tickernest.core.formatSignedMoney
 import com.tickernest.app.ui.components.trendColor
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BrokerScreen(
+    onBack: () -> Unit = {},
     onEdit: (BrokerHoldingEntity) -> Unit,
     onImportCsv: () -> Unit,
     vm: BrokerViewModel = hiltViewModel(),
 ) {
     val rows by vm.holdings.collectAsStateWithLifecycle()
     Column(Modifier.fillMaxSize()) {
-        Row(
-            Modifier.fillMaxWidth().padding(12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text("Holdings (${rows.size})", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-            FilledTonalButton(onClick = onImportCsv) { Text("Import CSV") }
-        }
+        TopAppBar(
+            title = { Text("Holdings (${rows.size})") },
+            navigationIcon = {
+                IconButton(onClick = onBack) {
+                    Icon(androidx.compose.material.icons.Icons.Default.ArrowBack, contentDescription = "Back")
+                }
+            },
+            actions = {
+                IconButton(onClick = onImportCsv) {
+                    Icon(androidx.compose.material.icons.Icons.Default.Upload, contentDescription = "Import CSV")
+                }
+                IconButton(onClick = { vm.refresh() }) {
+                    Icon(androidx.compose.material.icons.Icons.Default.Refresh, contentDescription = "Refresh")
+                }
+            }
+        )
         LazyColumn(Modifier.fillMaxSize()) {
             items(rows, key = { "${it.brokerId}:${it.ticker}" }) { h ->
                 HoldingRow(h, onClick = { onEdit(h) })

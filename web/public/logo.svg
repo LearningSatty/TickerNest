@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <!-- Background rounded square -->
+  <rect width="512" height="512" rx="96" fill="#0f172a"/>
+
+  <!-- Subtle gradient overlay -->
+  <rect width="512" height="512" rx="96" fill="url(#bgGrad)" opacity="0.15"/>
+
+  <!-- Nest: three curved lines at bottom -->
+  <path d="M120 360 C120 360 165 420 256 420 C347 420 392 360 392 360"
+        stroke="#334155" stroke-width="18" stroke-linecap="round" fill="none"/>
+  <path d="M140 345 C140 345 175 395 256 395 C337 395 372 345 372 345"
+        stroke="#475569" stroke-width="12" stroke-linecap="round" fill="none"/>
+  <path d="M160 332 C160 332 190 372 256 372 C322 372 352 332 352 332"
+        stroke="#64748b" stroke-width="8" stroke-linecap="round" fill="none"/>
+
+  <!-- Rising chart line -->
+  <polyline points="100,300 155,280 195,290 240,240 285,190 330,140 385,95"
+            stroke="url(#chartGrad)" stroke-width="20" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+
+  <!-- Glow behind chart line -->
+  <polyline points="100,300 155,280 195,290 240,240 285,190 330,140 385,95"
+            stroke="#10b981" stroke-width="28" stroke-linecap="round" stroke-linejoin="round" fill="none" opacity="0.15"/>
+
+  <!-- Arrow head -->
+  <path d="M370 82 L395 92 L380 112" stroke="#10b981" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+
+  <!-- Dot at peak -->
+  <circle cx="385" cy="95" r="10" fill="#10b981"/>
+
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#10b981"/>
+    </linearGradient>
+    <linearGradient id="chartGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="60%" stop-color="#10b981"/>
+      <stop offset="100%" stop-color="#34d399"/>
+    </linearGradient>
+  </defs>
+</svg>

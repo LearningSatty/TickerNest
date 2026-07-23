@@ -66,7 +66,7 @@ export function CsvImportWizard({ broker, onClose, onCommitted }: Props) {
         <header className="flex items-baseline justify-between p-5 border-b border-line/60">
           <div>
             <h2 className="text-lg font-semibold">Import CSV — {broker.displayName}</h2>
-            <p className="text-2xs text-ink-muted">Profile: {broker.csvProfileKey}</p>
+            <p className="text-2xs text-ink-muted">Exchange: {broker.exchangeDefault}</p>
           </div>
           <button
             className="text-ink-muted hover:text-ink"

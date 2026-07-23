@@ -36,6 +36,8 @@ const Icon = {
   Sector: '🏷️',
   Watchlist: '👁',
   Sold: '💸',
+  Notes: '📝',
+  Calendar: '📅',
   Broker: '🏦',
   Excel: '📥',
   Settings: '⚙',
@@ -84,10 +86,13 @@ export default function AppShell() {
       title: '',
       items: [
         { to: '/dashboard', label: 'Dashboard', icon: Icon.Dashboard },
-        { to: '/portfolio', label: 'Consolidated', icon: Icon.Portfolio },
+        { to: '/portfolio', label: 'Portfolio Summary', icon: Icon.Portfolio },
+        { to: '/portfolio/broker', label: 'Portfolio By Broker', icon: Icon.Broker },
         { to: '/portfolio/sector', label: 'By Sector', icon: Icon.Sector },
         { to: '/watchlists', label: 'Watchlists', icon: Icon.Watchlist },
         { to: '/sold', label: 'Sold Shares', icon: Icon.Sold },
+        { to: '/notes', label: 'Notes', icon: Icon.Notes },
+        { to: '/calendar', label: 'Event Calendar', icon: Icon.Calendar },
       ],
     },
     {
@@ -102,6 +107,7 @@ export default function AppShell() {
       title: 'Tools',
       items: [
         { to: '/import/excel', label: 'Excel Onboarding', icon: Icon.Excel },
+        { to: '/import/onboarding', label: 'Portfolio Onboarding', icon: Icon.Excel },
         { to: '/settings', label: 'Settings', icon: Icon.Settings },
       ],
     },
@@ -131,7 +137,22 @@ export default function AppShell() {
               collapsed ? 'opacity-0 pointer-events-none w-0' : 'opacity-100',
             )}
           >
-            <div className="text-base font-semibold text-accent leading-tight">
+            <div className="text-base font-semibold text-accent leading-tight flex items-center gap-1.5">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none" className="w-5 h-5 shrink-0">
+                <rect width="512" height="512" rx="96" fill="#0f172a"/>
+                <rect width="512" height="512" rx="96" fill="url(#tnBgGrad)" opacity="0.15"/>
+                <path d="M120 360 C120 360 165 420 256 420 C347 420 392 360 392 360" stroke="#334155" strokeWidth="18" strokeLinecap="round" fill="none"/>
+                <path d="M140 345 C140 345 175 395 256 395 C337 395 372 345 372 345" stroke="#475569" strokeWidth="12" strokeLinecap="round" fill="none"/>
+                <path d="M160 332 C160 332 190 372 256 372 C322 372 352 332 352 332" stroke="#64748b" strokeWidth="8" strokeLinecap="round" fill="none"/>
+                <polyline points="100,300 155,280 195,290 240,240 285,190 330,140 385,95" stroke="url(#tnChartGrad)" strokeWidth="20" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+                <polyline points="100,300 155,280 195,290 240,240 285,190 330,140 385,95" stroke="#10b981" strokeWidth="28" strokeLinecap="round" strokeLinejoin="round" fill="none" opacity="0.15"/>
+                <path d="M370 82 L395 92 L380 112" stroke="#10b981" strokeWidth="12" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+                <circle cx="385" cy="95" r="10" fill="#10b981"/>
+                <defs>
+                  <linearGradient id="tnBgGrad" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stopColor="#6366f1"/><stop offset="100%" stopColor="#10b981"/></linearGradient>
+                  <linearGradient id="tnChartGrad" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stopColor="#6366f1"/><stop offset="60%" stopColor="#10b981"/><stop offset="100%" stopColor="#34d399"/></linearGradient>
+                </defs>
+              </svg>
               TickerNest
             </div>
             <div className="text-2xs text-ink-muted truncate">
@@ -218,6 +239,7 @@ function DrawerLink({
   return (
     <NavLink
       to={to}
+      end
       title={collapsed ? label : ''}
       className={({ isActive }) =>
         cn(

@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <!-- Background circle -->
+  <circle cx="256" cy="256" r="240" fill="#0f172a"/>
+  <circle cx="256" cy="256" r="240" fill="url(#grad)" opacity="0.3"/>
+
+  <!-- Nest base (rounded bowl shape) -->
+  <path d="M128 340 C128 340 160 400 256 400 C352 400 384 340 384 340"
+        stroke="#475569" stroke-width="16" stroke-linecap="round" fill="none"/>
+  <path d="M112 320 C112 320 148 390 256 390 C364 390 400 320 400 320"
+        stroke="#64748b" stroke-width="10" stroke-linecap="round" fill="none" opacity="0.5"/>
+
+  <!-- Egg shape in nest -->
+  <ellipse cx="256" cy="310" rx="52" ry="65" fill="url(#eggGrad)" opacity="0.9"/>
+
+  <!-- Rising stock chart line going up from egg -->
+  <polyline points="140,280 180,260 210,270 240,230 270,200 300,170 340,120 380,90"
+            stroke="url(#lineGrad)" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+
+  <!-- Arrow tip at end of chart line -->
+  <polygon points="380,90 365,115 390,108" fill="#10b981"/>
+
+  <!-- Small candlesticks decorative -->
+  <rect x="165" y="252" width="6" height="20" rx="2" fill="#10b981" opacity="0.6"/>
+  <rect x="195" y="258" width="6" height="22" rx="2" fill="#ef4444" opacity="0.6"/>
+  <rect x="225" y="222" width="6" height="18" rx="2" fill="#10b981" opacity="0.6"/>
+  <rect x="255" y="192" width="6" height="16" rx="2" fill="#10b981" opacity="0.6"/>
+  <rect x="285" y="162" width="6" height="18" rx="2" fill="#10b981" opacity="0.6"/>
+
+  <!-- "T" letter subtly in the egg -->
+  <text x="256" y="325" text-anchor="middle" font-family="Inter, sans-serif" font-weight="700" font-size="52" fill="#0f172a" opacity="0.7">T</text>
+
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#10b981"/>
+    </linearGradient>
+    <linearGradient id="lineGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="50%" stop-color="#10b981"/>
+      <stop offset="100%" stop-color="#10b981"/>
+    </linearGradient>
+    <linearGradient id="eggGrad" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#e2e8f0"/>
+      <stop offset="100%" stop-color="#94a3b8"/>
+    </linearGradient>
+  </defs>
+</svg>

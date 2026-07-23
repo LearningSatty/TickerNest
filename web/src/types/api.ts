@@ -12,9 +12,7 @@ export interface Broker {
   displayName: string;
   currency: 'INR' | 'USD';
   sortOrder: number;
-  csvProfileKey:
-    | 'icici-direct' | 'iifl' | 'groww' | 'kite' | 'angelone' | 'ind-money'
-    | 'mstock' | 'custom';
+  exchangeDefault: string;
 }
 
 export interface BrokerHolding {

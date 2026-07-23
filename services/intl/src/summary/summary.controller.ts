@@ -56,8 +56,6 @@ export class SummaryController {
           invested: toWire(usInvestedInr),
           current: toWire(usInvestedInr),
           pl: '0.0000',
-          investedUsd: toWire(usInvestedUsd),
-          fxRate: usdInrRate ? toWire(usdInrRate) : null,
         },
         crypto: {
           invested: toWire(cryptoInvestedInr),

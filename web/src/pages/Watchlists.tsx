@@ -34,8 +34,11 @@ import Watchlist from '@/pages/Watchlist';
 interface WatchlistRow {
   id: string;
   name: string;
+  description: string | null;
   groupId: string | null;
-  market: 'IN' | 'US';
+  market: 'IN' | 'US' | 'OTHER';
+  marketSymbol: string | null;
+  isPinned: boolean;
   itemCount: number;
   position: number;
 }
@@ -43,6 +46,7 @@ interface GroupRow {
   id: string;
   name: string;
   position: number;
+  isPinned: boolean;
 }
 interface MoverRow {
   ticker: string;
@@ -76,12 +80,14 @@ export default function Watchlists() {
   const [createWlName, setCreateWlName] = useState('');
   // '' = no group; '__new__' opens the inline group-create modal
   const [createWlGroupId, setCreateWlGroupId] = useState<string>('');
-  const [createWlMarket, setCreateWlMarket] = useState<'IN' | 'US'>('IN');
+  const [createWlMarket, setCreateWlMarket] = useState<'IN' | 'US' | 'OTHER'>('IN');
+  const [createWlMarketSymbol, setCreateWlMarketSymbol] = useState('');
   const [createGroupOpen, setCreateGroupOpen] = useState(false);
   const [createGroupName, setCreateGroupName] = useState('');
 
   // Drag state
   const [dragWlId, setDragWlId] = useState<string | null>(null);
+  const [dragGroupId, setDragGroupId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
 
   // Persisted accordion-collapsed state.  Set entries are group ids that
@@ -115,13 +121,14 @@ export default function Watchlists() {
   });
 
   const createWlMut = useMutation({
-    mutationFn: (vars: { name: string; groupId?: string; market: 'IN' | 'US' }) =>
+    mutationFn: (vars: { name: string; groupId?: string; market: 'IN' | 'US' | 'OTHER'; marketSymbol?: string }) =>
       api<WatchlistRow>('/watchlists', { body: vars }),
     onSuccess: (created) => {
       setCreateWlOpen(false);
       setCreateWlName('');
       setCreateWlGroupId('');
       setCreateWlMarket('IN');
+      setCreateWlMarketSymbol('');
       qc.invalidateQueries({ queryKey: ['watchlists'] });
       nav(`/watchlists/${created.id}`);
     },
@@ -160,15 +167,36 @@ export default function Watchlists() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['watchlists'] }),
   });
 
+  const patchWlMut = useMutation({
+    mutationFn: (vars: { id: string; name?: string; isPinned?: boolean; position?: number; description?: string | null }) =>
+      api(`/watchlists/${vars.id}`, {
+        method: 'PATCH',
+        body: { ...(vars.name !== undefined && { name: vars.name }), ...(vars.isPinned !== undefined && { isPinned: vars.isPinned }), ...(vars.position !== undefined && { position: vars.position }), ...(vars.description !== undefined && { description: vars.description }) },
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['watchlists'] });
+      qc.invalidateQueries({ queryKey: ['watchlist'] });
+    },
+  });
+
   const deleteGroupMut = useMutation({
     mutationFn: (id: string) =>
       api(`/watchlists/groups/${id}`, { method: 'DELETE' }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['watchlist-groups'] });
-      // Member watchlists' group_id becomes NULL via FK ON DELETE SET NULL,
-      // so refresh the list as well.
       qc.invalidateQueries({ queryKey: ['watchlists'] });
     },
+  });
+
+  const patchGroupMut = useMutation({
+    mutationFn: (vars: { id: string; name?: string; position?: number; isPinned?: boolean }) => {
+      const body: Record<string, unknown> = {};
+      if (vars.name !== undefined) body['name'] = vars.name;
+      if (vars.position !== undefined) body['position'] = vars.position;
+      if (vars.isPinned !== undefined) body['isPinned'] = vars.isPinned;
+      return api(`/watchlists/groups/${vars.id}`, { method: 'PATCH', body });
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['watchlist-groups'] }),
   });
 
   // Filter & group watchlists for the sidebar render.
@@ -215,9 +243,11 @@ export default function Watchlists() {
   const confirmCreateWl = () => {
     const n = createWlName.trim();
     if (!n) return;
+    if (createWlMarket === 'OTHER' && !createWlMarketSymbol.trim()) return;
     createWlMut.mutate({
       name: n,
       market: createWlMarket,
+      ...(createWlMarket === 'OTHER' ? { marketSymbol: createWlMarketSymbol.trim().toUpperCase() } : {}),
       ...(createWlGroupId ? { groupId: createWlGroupId } : {}),
     });
   };
@@ -286,7 +316,7 @@ export default function Watchlists() {
                 isUngrouped={isUngrouped}
                 isCollapsed={isCollapsed}
                 isDropTarget={dropTarget === key}
-                isDragging={!!dragWlId}
+                isDragging={!!dragWlId || !!dragGroupId}
                 selectedId={selectedId}
                 onToggle={() => toggleCollapsed(key)}
                 onDragOver={() => setDropTarget(key)}
@@ -297,7 +327,13 @@ export default function Watchlists() {
                   setDropTarget(null);
                 }}
                 onWlDelete={(wlId) => deleteWlMut.mutate(wlId)}
+                onWlPin={(wlId, pin) => patchWlMut.mutate({ id: wlId, isPinned: pin })}
                 {...(group && {
+                  isPinnedGroup: group.isPinned,
+                  onGroupDragStart: () => setDragGroupId(group.id),
+                  onGroupDragEnd: () => { setDragGroupId(null); setDropTarget(null); },
+                  onRenameGroup: (newName: string) => patchGroupMut.mutate({ id: group.id, name: newName }),
+                  onPinGroup: () => patchGroupMut.mutate({ id: group.id, isPinned: !group.isPinned }),
                   onDelete: () => {
                     if (
                       confirm(
@@ -378,17 +414,35 @@ export default function Watchlists() {
             </label>
             <select
               value={createWlMarket}
-              onChange={(e) =>
-                setCreateWlMarket(e.target.value as 'IN' | 'US')
-              }
+              onChange={(e) => {
+                setCreateWlMarket(e.target.value as 'IN' | 'US' | 'OTHER');
+                if (e.target.value !== 'OTHER') setCreateWlMarketSymbol('');
+              }}
               className="w-full bg-bg border border-line rounded-md px-3 py-2 text-sm focus:outline-none focus:border-accent"
             >
               <option value="IN">🇮🇳 Indian (NSE/BSE)</option>
               <option value="US">🇺🇸 US (NYSE/Nasdaq)</option>
+              <option value="OTHER">🌐 Other (global exchange)</option>
             </select>
-            <p className="text-2xs text-ink-muted mt-1">
-              Sets the default market filter when adding tickers to this watchlist.
-            </p>
+            {createWlMarket === 'OTHER' && (
+              <div className="mt-2">
+                <input
+                  value={createWlMarketSymbol}
+                  onChange={(e) => setCreateWlMarketSymbol(e.target.value)}
+                  placeholder='Exchange symbol, e.g. "TYO", "HKG", "LON"'
+                  maxLength={10}
+                  className="w-full bg-bg border border-line rounded-md px-3 py-2 text-sm focus:outline-none focus:border-accent"
+                />
+                <p className="text-2xs text-ink-muted mt-1">
+                  This symbol is displayed as a badge on the watchlist (e.g. TYO for Tokyo Stock Exchange).
+                </p>
+              </div>
+            )}
+            {createWlMarket !== 'OTHER' && (
+              <p className="text-2xs text-ink-muted mt-1">
+                Sets the default market filter when adding tickers to this watchlist.
+              </p>
+            )}
           </div>
           <div>
             <label className="block text-2xs uppercase tracking-wide text-ink-muted mb-1">
@@ -506,6 +560,12 @@ function GroupBlock({
   onWlDragStart,
   onWlDragEnd,
   onWlDelete,
+  onWlPin,
+  onRenameGroup,
+  onPinGroup,
+  isPinnedGroup,
+  onGroupDragStart,
+  onGroupDragEnd,
   onDelete,
 }: {
   groupKey: string;
@@ -522,11 +582,25 @@ function GroupBlock({
   onWlDragStart: (wlId: string) => void;
   onWlDragEnd: () => void;
   onWlDelete: (wlId: string) => void;
+  onWlPin: (wlId: string, pin: boolean) => void;
+  onRenameGroup?: (newName: string) => void;
+  onPinGroup?: () => void;
+  isPinnedGroup?: boolean;
+  onGroupDragStart?: () => void;
+  onGroupDragEnd?: () => void;
   onDelete?: () => void;
 }) {
-  void groupKey; // unused — only here to keep the prop signature symmetrical
+  void groupKey;
   return (
     <div
+      draggable={!isUngrouped}
+      onDragStart={(e) => {
+        if (isUngrouped || !onGroupDragStart) { e.preventDefault(); return; }
+        onGroupDragStart();
+        e.dataTransfer.setData('text/plain', `group:${groupKey}`);
+        e.dataTransfer.effectAllowed = 'move';
+      }}
+      onDragEnd={() => onGroupDragEnd?.()}
       onDragOver={(e) => {
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
@@ -541,43 +615,21 @@ function GroupBlock({
       }}
       className={cn(
         'rounded-md transition-colors',
+        !isUngrouped && 'cursor-grab active:cursor-grabbing',
         isDropTarget && 'bg-accent/10 ring-1 ring-accent/40',
       )}
     >
-      {/* Header row: chevron, group icon, name */}
-      <div className="group/hdr flex items-center px-1 py-1">
-        <button
-          type="button"
-          onClick={onToggle}
-          className="flex-1 flex items-center gap-1.5 px-1 py-0.5 text-sm text-ink hover:text-accent"
-        >
-          {/* Chevron — points down when expanded, right when collapsed */}
-          <span
-            className={cn(
-              'inline-flex w-3 h-3 items-center justify-center text-ink-muted transition-transform shrink-0',
-              isCollapsed ? '-rotate-90' : 'rotate-0',
-            )}
-            aria-hidden
-          >
-            ▼
-          </span>
-          {/* Group icon — different glyph for ungrouped vs custom group */}
-          <span className="text-ink-muted text-sm shrink-0" aria-hidden>
-            {isUngrouped ? '☰' : '🗂'}
-          </span>
-          <span className="truncate">{title}</span>
-        </button>
-        {onDelete && !isUngrouped && (
-          <button
-            type="button"
-            onClick={onDelete}
-            title={`Delete group "${title}"`}
-            className="text-2xs text-ink-muted hover:text-loss px-1.5 opacity-0 group-hover/hdr:opacity-100 transition-opacity"
-          >
-            ✕
-          </button>
-        )}
-      </div>
+      {/* Header row: chevron, group icon, name, rename/delete/pin */}
+      <GroupHeader
+        title={title}
+        isUngrouped={isUngrouped}
+        isCollapsed={isCollapsed}
+        isPinned={isPinnedGroup ?? false}
+        onToggle={onToggle}
+        {...(onRenameGroup ? { onRename: onRenameGroup } : {})}
+        {...(onPinGroup ? { onPin: onPinGroup } : {})}
+        {...(onDelete ? { onDelete } : {})}
+      />
       {!isCollapsed && (
         <div className="space-y-0.5">
           {items.length === 0 && (
@@ -593,6 +645,7 @@ function GroupBlock({
               onDragStart={() => onWlDragStart(w.id)}
               onDragEnd={onWlDragEnd}
               onDelete={() => onWlDelete(w.id)}
+              onPin={() => onWlPin(w.id, !w.isPinned)}
             />
           ))}
         </div>
@@ -608,12 +661,14 @@ function WlRow({
   onDragStart,
   onDragEnd,
   onDelete,
+  onPin,
 }: {
   wl: WatchlistRow;
   selected: boolean;
   onDragStart: () => void;
   onDragEnd: () => void;
   onDelete: () => void;
+  onPin: () => void;
 }) {
   return (
     <Link
@@ -633,38 +688,147 @@ function WlRow({
           : 'text-ink-muted',
       )}
     >
-      {/* Slack-style # prefix.  Muted so it doesn't fight with the name. */}
-      <span className="text-ink-muted/80 mr-1.5 shrink-0">#</span>
+      {/* Pin indicator */}
+      {wl.isPinned && (
+        <span className="text-[10px] mr-0.5 shrink-0" title="Pinned">📌</span>
+      )}
+      {/* Slack-style # prefix */}
+      {!wl.isPinned && <span className="text-ink-muted/80 mr-1.5 shrink-0">#</span>}
       <span className="truncate flex-1">{wl.name}</span>
-      {/* US flag chip when applicable, so you can see at a glance which
-          watchlists track US tickers. */}
+      {/* Market badge — flag for IN/US, custom symbol for OTHER */}
       {wl.market === 'US' && (
         <span className="text-2xs ml-1 shrink-0" title="US market">🇺🇸</span>
+      )}
+      {wl.market === 'OTHER' && wl.marketSymbol && (
+        <span className="text-2xs ml-1 shrink-0 px-1 py-0.5 rounded bg-line/60 text-ink-muted font-medium" title={`${wl.marketSymbol} exchange`}>
+          {wl.marketSymbol}
+        </span>
       )}
       <span className="text-2xs text-ink-muted ml-2 shrink-0 tabular-nums">
         {wl.itemCount}
       </span>
-      {/* Delete button — visible on hover only.  preventDefault stops the
-          parent <Link> from navigating into the (about-to-be-deleted) watchlist. */}
-      <button
-        type="button"
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          if (
-            confirm(
-              `Delete "${wl.name}"? Tickers in this watchlist are removed but other watchlists are unaffected.`,
-            )
-          ) {
-            onDelete();
-          }
-        }}
-        title={`Delete watchlist "${wl.name}"`}
-        className="ml-1 text-2xs text-ink-muted hover:text-loss px-1 opacity-0 group-hover/wl:opacity-100 transition-opacity"
-      >
-        ✕
-      </button>
+      {/* Action buttons — visible on hover: pin toggle + delete */}
+      <span className="ml-1 flex items-center gap-0.5 opacity-0 group-hover/wl:opacity-100 transition-opacity shrink-0">
+        <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); onPin(); }} title={wl.isPinned ? 'Unpin' : 'Pin to top'} className="text-[10px] text-ink-muted hover:text-ink px-0.5">{wl.isPinned ? '📌' : '📍'}</button>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (confirm(`Delete "${wl.name}"? Tickers in this watchlist are removed but other watchlists are unaffected.`)) onDelete();
+          }}
+          title={`Delete watchlist "${wl.name}"`}
+          className="text-2xs text-ink-muted hover:text-loss px-0.5"
+        >
+          ✕
+        </button>
+      </span>
     </Link>
+  );
+}
+
+// ─── Group header with editable name ─────────────────────────────────────────
+function GroupHeader({
+  title,
+  isUngrouped,
+  isCollapsed,
+  isPinned,
+  onToggle,
+  onRename,
+  onPin,
+  onDelete,
+}: {
+  title: string;
+  isUngrouped: boolean;
+  isCollapsed: boolean;
+  isPinned: boolean;
+  onToggle: () => void;
+  onRename?: (newName: string) => void;
+  onPin?: () => void;
+  onDelete?: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(title);
+
+  const commit = () => {
+    const trimmed = val.trim();
+    if (trimmed && trimmed !== title && onRename) onRename(trimmed);
+    setEditing(false);
+  };
+
+  return (
+    <div className="group/hdr flex items-center px-1 py-1">
+      {editing && !isUngrouped ? (
+        <div className="flex-1 flex items-center gap-1.5 px-1">
+          <span className="text-ink-muted text-sm shrink-0" aria-hidden>🗂</span>
+          <input
+            value={val}
+            onChange={(e) => setVal(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commit();
+              if (e.key === 'Escape') { setVal(title); setEditing(false); }
+            }}
+            autoFocus
+            className="flex-1 min-w-0 bg-bg border border-accent rounded px-1.5 py-0 text-sm focus:outline-none"
+          />
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex-1 flex items-center gap-1.5 px-1 py-0.5 text-sm text-ink hover:text-accent"
+        >
+          <span
+            className={cn(
+              'inline-flex w-3 h-3 items-center justify-center text-ink-muted transition-transform shrink-0',
+              isCollapsed ? '-rotate-90' : 'rotate-0',
+            )}
+            aria-hidden
+          >
+            ▼
+          </span>
+          <span className="text-ink-muted text-sm shrink-0" aria-hidden>
+            {isUngrouped ? '☰' : isPinned ? '📌' : '🗂'}
+          </span>
+          <span className="truncate">{title}</span>
+        </button>
+      )}
+      {!isUngrouped && !editing && (
+        <span className="flex items-center gap-0.5 opacity-0 group-hover/hdr:opacity-100 transition-opacity">
+          {onPin && (
+            <button
+              type="button"
+              onClick={onPin}
+              title={isPinned ? 'Unpin group' : 'Pin group to top'}
+              className="text-[10px] text-ink-muted hover:text-ink px-1"
+            >
+              {isPinned ? '📌' : '📍'}
+            </button>
+          )}
+          {onRename && (
+            <button
+              type="button"
+              onClick={() => { setVal(title); setEditing(true); }}
+              title="Rename group"
+              className="text-[10px] text-ink-muted hover:text-ink px-1"
+            >
+              ✏️
+            </button>
+          )}
+          {onDelete && (
+            <button
+              type="button"
+              onClick={onDelete}
+              title={`Delete group "${title}"`}
+              className="text-2xs text-ink-muted hover:text-loss px-1"
+            >
+              ✕
+            </button>
+          )}
+        </span>
+      )}
+    </div>
   );
 }
 

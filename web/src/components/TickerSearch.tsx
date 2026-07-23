@@ -22,7 +22,7 @@ import {
 import { api } from '@/lib/api';
 import { cn } from '@/lib/cn';
 
-export type Market = 'IN' | 'US';
+export type Market = 'IN' | 'US' | 'OTHER';
 
 /** Imperative handle exposed via ref — lets the parent focus the input
  *  programmatically (e.g. after a successful add, the watchlist page focuses
@@ -50,10 +50,12 @@ interface Props {
 
 /** Canonical exchange codes per market. The API normalises Yahoo's various
  *  exchange/exchDisp values down to these — see normaliseExchange in
- *  yahoo.provider.ts. Anything else is dropped from the dropdown. */
-const MARKET_EXCHANGES: Record<Market, ReadonlySet<string>> = {
+ *  yahoo.provider.ts. For 'OTHER' we pass all results through unfiltered
+ *  so the user can pick any global exchange (TYO, HKG, LON, etc.). */
+const MARKET_EXCHANGES: Record<Market, ReadonlySet<string> | null> = {
   IN: new Set(['NSE', 'BSE']),
   US: new Set(['NASDAQ', 'NYSE', 'AMEX']),
+  OTHER: null, // null = no filtering, show all results
 };
 
 const TickerSearch = forwardRef<TickerSearchHandle, Props>(function TickerSearch(
@@ -163,12 +165,15 @@ const TickerSearch = forwardRef<TickerSearchHandle, Props>(function TickerSearch
   const showDropdown = open && (loading || hits.length > 0 || debounced.length >= 2);
 
   // Filter to the selected market and rank NSE > BSE within India.
+  // For 'OTHER' market, no exchange filtering is applied — all hits pass.
   const ranked = useMemo(() => {
     const allow = MARKET_EXCHANGES[market];
-    const filtered = hits.filter((h) => {
-      const ex = (h.exchange ?? '').toUpperCase();
-      return allow.has(ex);
-    });
+    const filtered = allow
+      ? hits.filter((h) => {
+          const ex = (h.exchange ?? '').toUpperCase();
+          return allow.has(ex);
+        })
+      : hits; // OTHER → show all exchanges
     const order: Record<string, number> = {
       NSE: 0, NSI: 0,
       BSE: 1, BSI: 1,

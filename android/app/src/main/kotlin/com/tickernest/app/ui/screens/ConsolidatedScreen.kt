@@ -35,7 +35,10 @@ import androidx.compose.foundation.layout.PaddingValues
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ConsolidatedScreen(vm: ConsolidatedViewModel = hiltViewModel()) {
+fun ConsolidatedScreen(
+    onOpenBroker: (String) -> Unit = {},
+    vm: ConsolidatedViewModel = hiltViewModel(),
+) {
     val state by vm.state.collectAsStateWithLifecycle()
     val tabular = TextStyle(
         fontFeatureSettings = "tnum",

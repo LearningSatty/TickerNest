@@ -25,6 +25,7 @@ export default function GlobalStockSearch() {
       >
         <option value="IN">🇮🇳 Indian</option>
         <option value="US">🇺🇸 US</option>
+        <option value="OTHER">🌐 Other</option>
       </select>
       <div className="flex-1 min-w-0 max-w-2xl">
         <TickerSearch
@@ -33,7 +34,9 @@ export default function GlobalStockSearch() {
           placeholder={
             market === 'IN'
               ? 'Quick search any NSE/BSE stock…'
-              : 'Quick search any US stock…'
+              : market === 'US'
+                ? 'Quick search any US stock…'
+                : 'Search any global stock (e.g. TYO: Toyota, HKG: Alibaba)…'
           }
         />
       </div>

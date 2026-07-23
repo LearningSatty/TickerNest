@@ -9,13 +9,12 @@ import com.tickernest.app.db.AppDatabase
 import com.tickernest.app.db.BrokerEntity
 import com.tickernest.app.db.BrokerHoldingEntity
 import com.tickernest.app.db.ConsolidatedRowEntity
+import com.tickernest.app.db.SoldShareEntity
 import com.tickernest.app.realtime.RealtimeClient
 import com.tickernest.app.realtime.RealtimeEvent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
@@ -50,6 +49,7 @@ class PortfolioRepository @Inject constructor(
 
     fun observeBrokers() = db.brokerDao().observe()
     fun observeHoldings(brokerId: String) = db.brokerHoldingDao().observe(brokerId)
+    fun observeSoldShares() = db.soldShareDao().observe()
 
     suspend fun refreshConsolidated() {
         val resp = api.consolidated()
@@ -71,6 +71,20 @@ class PortfolioRepository @Inject constructor(
         )
     }
 
+    suspend fun refreshSoldShares() {
+        val rows = api.soldShares()
+        db.soldShareDao().replaceAll(rows.map {
+            SoldShareEntity(
+                id = it.id, brokerId = it.brokerId, ticker = it.ticker,
+                name = it.name, qty = it.qty,
+                costBasisAtSell = it.costBasisAtSell,
+                soldPrice = it.soldPrice, reason = it.reason,
+                mistake = it.mistake, soldAt = it.soldAt,
+                cachedAt = System.currentTimeMillis(),
+            )
+        })
+    }
+
     suspend fun upsertHolding(
         brokerId: String,
         ticker: String,
@@ -78,8 +92,6 @@ class PortfolioRepository @Inject constructor(
     ): UpsertHoldingResponseDto {
         val key = UUID.randomUUID().toString()
         val resp = api.upsertHolding(key, brokerId, ticker, body)
-        // optimistic refresh of just-this-broker; the listener will push
-        // the consolidated update too.
         refreshBroker(brokerId)
         refreshConsolidated()
         return resp

@@ -20,9 +20,13 @@ import StockDetail from '@/pages/StockDetail';
 import SoldShares from '@/pages/SoldShares';
 import ExcelOnboard from '@/pages/ExcelOnboard';
 import Settings from '@/pages/Settings';
+import Notes from '@/pages/Notes';
+import EventCalendar from '@/pages/EventCalendar';
 import MfPortfolio from '@/pages/mf/MfPortfolio';
 import UsHoldings from '@/pages/investments/UsHoldings';
 import AssetsList from '@/pages/assets/AssetsList';
+import PortfolioOnboarding from '@/pages/PortfolioOnboarding';
+import PortfolioByBroker from '@/pages/PortfolioByBroker';
 import { useAuth } from '@/hooks/useAuth';
 import { ThemeProvider, bootTheme } from '@/lib/theme';
 
@@ -62,6 +66,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
               <Route index element={<Navigate to="/dashboard" replace />} />
               <Route path="dashboard" element={<Dashboard />} />
               <Route path="portfolio" element={<Portfolio />} />
+              <Route path="portfolio/broker" element={<PortfolioByBroker />} />
               <Route path="portfolio/sector" element={<Portfolio />} />
               <Route path="broker/:id" element={<BrokerPage />} />
               <Route path="watchlists" element={<Watchlists />} />
@@ -72,8 +77,11 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
               <Route path="mf" element={<MfPortfolio />} />
               <Route path="investments" element={<UsHoldings />} />
               <Route path="assets" element={<AssetsList />} />
+              <Route path="notes" element={<Notes />} />
+              <Route path="calendar" element={<EventCalendar />} />
               <Route path="sold" element={<SoldShares />} />
               <Route path="import/excel" element={<ExcelOnboard />} />
+              <Route path="import/onboarding" element={<PortfolioOnboarding />} />
               <Route path="settings" element={<Settings />} />
             </Route>
           </Routes>

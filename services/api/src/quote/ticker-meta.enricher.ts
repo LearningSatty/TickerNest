@@ -195,7 +195,13 @@ export class TickerMetaEnricher implements OnModuleInit, OnModuleDestroy {
           avg_volume, listing_date, meta_refreshed_at)
        VALUES ${rows.join(', ')}
        ON CONFLICT (ticker) DO UPDATE SET
-         name                = EXCLUDED.name,
+         -- Prefer the longer/richer name (never downgrade from a full name to
+         -- a short one if both are non-null).
+         name                = CASE
+                                 WHEN LENGTH(EXCLUDED.name) >= LENGTH(COALESCE(ticker_meta.name, ''))
+                                 THEN EXCLUDED.name
+                                 ELSE ticker_meta.name
+                               END,
          sector              = EXCLUDED.sector,
          sector_domain       = EXCLUDED.sector_domain,
          market_type         = EXCLUDED.market_type,

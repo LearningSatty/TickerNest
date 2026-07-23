@@ -1,4 +1,15 @@
 import 'reflect-metadata';
+import * as pg from 'pg';
+
+// Override pg's default date/timestamp parsing to return raw strings instead of
+// JS Date objects. This prevents timezone-shift bugs (e.g., "2026-06-09" date
+// becoming "2026-06-08T18:30:00.000Z" when the server is in IST/UTC+5:30).
+const TYPE_DATE = 1082;       // pg type OID for DATE
+const TYPE_TIMESTAMP = 1114;  // TIMESTAMP WITHOUT TIME ZONE
+const TYPE_TIMESTAMPTZ = 1184; // TIMESTAMP WITH TIME ZONE
+pg.types.setTypeParser(TYPE_DATE, (val: string) => val);            // keep "2026-06-09" as-is
+pg.types.setTypeParser(TYPE_TIMESTAMP, (val: string) => val);
+pg.types.setTypeParser(TYPE_TIMESTAMPTZ, (val: string) => val);
 // Node <18.14 is missing Headers.prototype.getSetCookie which yahoo-finance2
 // needs when using the native Fetch API. Polyfill it so the cookie crumb
 // handshake succeeds on Node 18.12.x.  Remove once Node ≥20 is in use.

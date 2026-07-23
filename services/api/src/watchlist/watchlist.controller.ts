@@ -47,25 +47,56 @@ const CreateWatchlistDto = z.object({
   /** Optional group placement at create-time. */
   groupId: z.string().uuid().optional(),
   /** Market hint — used by the watchlist's add-ticker search dropdown. */
-  market: z.enum(['IN', 'US']).default('IN'),
-});
+  market: z.enum(['IN', 'US', 'OTHER']).default('IN'),
+  /** Custom exchange symbol (required when market='OTHER'), e.g. "TYO", "HKG". */
+  marketSymbol: z.string().min(1).max(10).optional(),
+}).refine(
+  (d) => d.market !== 'OTHER' || (d.marketSymbol && d.marketSymbol.trim().length > 0),
+  { message: 'marketSymbol is required when market is OTHER', path: ['marketSymbol'] },
+);
 
 const CreateGroupDto = z.object({
   name: z.string().min(1).max(80),
 });
 
+const PatchGroupDto = z.object({
+  name: z.string().min(1).max(80).optional(),
+  position: z.number().int().min(0).optional(),
+  isPinned: z.boolean().optional(),
+});
+
 const PatchWatchlistDto = z.object({
   /** null → ungroup; string id → move into that group. */
-  groupId: z.string().uuid().nullable(),
+  groupId: z.string().uuid().nullable().optional(),
+  /** Rename the watchlist. */
+  name: z.string().min(1).max(80).optional(),
+  /** Reorder: set the absolute position (0-based). */
+  position: z.number().int().min(0).optional(),
+  /** Pin / unpin the watchlist. */
+  isPinned: z.boolean().optional(),
+  /** Rich-text description for the watchlist (HTML from TipTap). null to clear. */
+  description: z.string().max(10000).nullable().optional(),
 });
 
 const AddSectionDto = z.object({
   name: z.string().min(1).max(80),
 });
 
+const RenameSectionDto = z.object({
+  newName: z.string().min(1).max(80),
+});
+
 const AddItemDto = z.object({
   ticker: z.string().min(1).max(40),
   sectionName: z.string().min(1).max(80).optional(),
+  /** Short note / reason for adding this stock (e.g. "Q3 results beat") */
+  note: z.string().max(200).optional(),
+  /** Full company name from the search result (seeds ticker_meta immediately). */
+  name: z.string().max(200).optional(),
+});
+
+const BulkDeleteItemsDto = z.object({
+  tickers: z.array(z.string().min(1).max(40)).min(1).max(500),
 });
 
 const PatchItemDto = z.object({
@@ -76,13 +107,17 @@ interface GroupRow {
   id: string;
   name: string;
   position: number;
+  isPinned: boolean;
 }
 
 interface WatchlistRow {
   id: string;
   name: string;
+  description: string | null;
   groupId: string | null;
-  market: 'IN' | 'US';
+  market: 'IN' | 'US' | 'OTHER';
+  marketSymbol: string | null;
+  isPinned: boolean;
   itemCount: number;
   position: number;
 }
@@ -90,6 +125,7 @@ interface WatchlistRow {
 interface WatchlistItemRow {
   ticker: string;
   name: string;
+  note: string | null;
   sectionName: string | null;
   position: number;
   currentPrice: string;
@@ -102,7 +138,9 @@ interface WatchlistItemRow {
 interface WatchlistDetailResponse {
   id: string;
   name: string;
-  market: 'IN' | 'US';
+  description: string | null;
+  market: 'IN' | 'US' | 'OTHER';
+  marketSymbol: string | null;
   sections: string[]; // user-defined order, may include empty sections
   items: WatchlistItemRow[];
 }
@@ -122,25 +160,31 @@ export class WatchlistController {
       const r = await tx.query<{
         id: string;
         name: string;
+        description: string | null;
         group_id: string | null;
-        market: 'IN' | 'US';
+        market: 'IN' | 'US' | 'OTHER';
+        market_symbol: string | null;
+        is_pinned: boolean;
         position: number;
         item_count: string;
       }>(
-        `SELECT w.id, w.name, w.group_id, w.market, w.position,
+        `SELECT w.id, w.name, w.description, w.group_id, w.market, w.market_symbol, w.is_pinned, w.position,
                 COALESCE(COUNT(wi.id), 0)::text AS item_count
            FROM watchlist w
       LEFT JOIN watchlist_item wi ON wi.watchlist_id = w.id
           WHERE w.user_id = $1
           GROUP BY w.id
-          ORDER BY w.position, w.name`,
+          ORDER BY w.is_pinned DESC, w.position, w.name`,
         [req.user!.id],
       );
       return r.rows.map((row) => ({
         id: row.id,
         name: row.name,
+        description: row.description,
         groupId: row.group_id,
         market: row.market,
+        marketSymbol: row.market_symbol,
+        isPinned: row.is_pinned,
         position: row.position,
         itemCount: Number(row.item_count),
       }));
@@ -158,14 +202,15 @@ export class WatchlistController {
         id: string;
         name: string;
         position: number;
+        is_pinned: boolean;
       }>(
-        `SELECT id, name, position
+        `SELECT id, name, position, is_pinned
            FROM watchlist_group
           WHERE user_id = $1
-          ORDER BY position, name`,
+          ORDER BY is_pinned DESC, position, name`,
         [req.user!.id],
       );
-      return r.rows;
+      return r.rows.map((row) => ({ id: row.id, name: row.name, position: row.position, isPinned: row.is_pinned }));
     });
   }
 
@@ -189,7 +234,43 @@ export class WatchlistController {
          VALUES ($1, $2, $3) RETURNING id`,
         [req.user!.id, dto.name.trim(), pos],
       );
-      return { id: r.rows[0]!.id, name: dto.name.trim(), position: pos };
+      return { id: r.rows[0]!.id, name: dto.name.trim(), position: pos, isPinned: false };
+    });
+  }
+
+  // ── Patch group (rename, reorder, pin) ───────────────────────────────────────
+  @Patch('groups/:groupId')
+  @UsePipes(new ZodValidationPipe(PatchGroupDto))
+  async patchGroup(
+    @Req() req: { user?: { id: string } },
+    @Param('groupId') groupId: string,
+    @Body() dto: z.infer<typeof PatchGroupDto>,
+  ): Promise<GroupRow> {
+    if (!req.user) throw new UnauthorizedException();
+    return this.db.withUserTx(req.user.id, async (tx) => {
+      const sets: string[] = [];
+      const params: unknown[] = [];
+      let idx = 1;
+      if (dto.name !== undefined) { sets.push(`name = $${idx++}`); params.push(dto.name.trim()); }
+      if (dto.position !== undefined) { sets.push(`position = $${idx++}`); params.push(dto.position); }
+      if (dto.isPinned !== undefined) { sets.push(`is_pinned = $${idx++}`); params.push(dto.isPinned); }
+      if (sets.length === 0) {
+        const cur = await tx.query<{ id: string; name: string; position: number; is_pinned: boolean }>(
+          `SELECT id, name, position, is_pinned FROM watchlist_group WHERE id = $1 AND user_id = $2`,
+          [groupId, req.user!.id],
+        );
+        if (cur.rows.length === 0) throw new UnauthorizedException('group not found');
+        const c = cur.rows[0]!;
+        return { id: c.id, name: c.name, position: c.position, isPinned: c.is_pinned };
+      }
+      params.push(groupId, req.user!.id);
+      const r = await tx.query<{ id: string; name: string; position: number; is_pinned: boolean }>(
+        `UPDATE watchlist_group SET ${sets.join(', ')} WHERE id = $${idx++} AND user_id = $${idx} RETURNING id, name, position, is_pinned`,
+        params,
+      );
+      if (r.rows.length === 0) throw new UnauthorizedException('group not found');
+      const row = r.rows[0]!;
+      return { id: row.id, name: row.name, position: row.position, isPinned: row.is_pinned };
     });
   }
 
@@ -210,14 +291,14 @@ export class WatchlistController {
     });
   }
 
-  // ── Move watchlist into / out of a group ────────────────────────────────────
+  // ── Patch watchlist (rename, move group, reorder, pin, description) ─────────
   @Patch(':id')
   @UsePipes(new ZodValidationPipe(PatchWatchlistDto))
   async patchWatchlist(
     @Req() req: { user?: { id: string } },
     @Param('id') id: string,
     @Body() dto: z.infer<typeof PatchWatchlistDto>,
-  ): Promise<{ id: string; groupId: string | null }> {
+  ): Promise<{ id: string; name: string; groupId: string | null; isPinned: boolean; position: number; description: string | null }> {
     if (!req.user) throw new UnauthorizedException();
     const userId = req.user.id;
     return this.db.withUserTx(userId, async (tx) => {
@@ -231,17 +312,38 @@ export class WatchlistController {
           throw new UnauthorizedException('group not found');
         }
       }
-      const r = await tx.query<{ id: string; group_id: string | null }>(
+      // Build SET clauses dynamically.
+      const sets: string[] = [];
+      const params: unknown[] = [];
+      let idx = 1;
+      if (dto.groupId !== undefined) { sets.push(`group_id = $${idx++}`); params.push(dto.groupId); }
+      if (dto.name !== undefined) { sets.push(`name = $${idx++}`); params.push(dto.name.trim()); }
+      if (dto.position !== undefined) { sets.push(`position = $${idx++}`); params.push(dto.position); }
+      if (dto.isPinned !== undefined) { sets.push(`is_pinned = $${idx++}`); params.push(dto.isPinned); }
+      if (dto.description !== undefined) { sets.push(`description = $${idx++}`); params.push(dto.description); }
+      if (sets.length === 0) {
+        // Nothing to update — just return current state.
+        const cur = await tx.query<{ id: string; name: string; group_id: string | null; is_pinned: boolean; position: number; description: string | null }>(
+          `SELECT id, name, group_id, is_pinned, position, description FROM watchlist WHERE id = $1 AND user_id = $2`,
+          [id, userId],
+        );
+        if (cur.rows.length === 0) throw new UnauthorizedException('watchlist not found');
+        const c = cur.rows[0]!;
+        return { id: c.id, name: c.name, groupId: c.group_id, isPinned: c.is_pinned, position: c.position, description: c.description };
+      }
+      params.push(id, userId);
+      const r = await tx.query<{ id: string; name: string; group_id: string | null; is_pinned: boolean; position: number; description: string | null }>(
         `UPDATE watchlist
-            SET group_id = $1
-          WHERE id = $2 AND user_id = $3
-          RETURNING id, group_id`,
-        [dto.groupId, id, userId],
+            SET ${sets.join(', ')}
+          WHERE id = $${idx++} AND user_id = $${idx}
+          RETURNING id, name, group_id, is_pinned, position, description`,
+        params,
       );
       if (r.rows.length === 0) {
         throw new UnauthorizedException('watchlist not found');
       }
-      return { id: r.rows[0]!.id, groupId: r.rows[0]!.group_id };
+      const row = r.rows[0]!;
+      return { id: row.id, name: row.name, groupId: row.group_id, isPinned: row.is_pinned, position: row.position, description: row.description };
     });
   }
 
@@ -271,17 +373,21 @@ export class WatchlistController {
         [userId],
       );
       const pos = (max.rows[0]!.max ?? 0) + 1;
+      const marketSymbol = dto.market === 'OTHER' ? (dto.marketSymbol!.trim().toUpperCase()) : null;
       const r = await tx.query<{ id: string }>(
-        `INSERT INTO watchlist (user_id, name, type, position, group_id, market)
-         VALUES ($1, $2, 'STANDARD', $3, $4, $5)
+        `INSERT INTO watchlist (user_id, name, type, position, group_id, market, market_symbol)
+         VALUES ($1, $2, 'STANDARD', $3, $4, $5, $6)
          RETURNING id`,
-        [userId, dto.name, pos, dto.groupId ?? null, dto.market],
+        [userId, dto.name, pos, dto.groupId ?? null, dto.market, marketSymbol],
       );
       return {
         id: r.rows[0]!.id,
         name: dto.name,
+        description: null,
         groupId: dto.groupId ?? null,
         market: dto.market,
+        marketSymbol,
+        isPinned: false,
         position: pos,
         itemCount: 0,
       };
@@ -466,10 +572,12 @@ export class WatchlistController {
       const wl = await tx.query<{
         id: string;
         name: string;
+        description: string | null;
         sections: string[];
-        market: 'IN' | 'US';
+        market: 'IN' | 'US' | 'OTHER';
+        market_symbol: string | null;
       }>(
-        `SELECT id, name, sections, market FROM watchlist WHERE id = $1 AND user_id = $2`,
+        `SELECT id, name, description, sections, market, market_symbol FROM watchlist WHERE id = $1 AND user_id = $2`,
         [id, userId],
       );
       if (wl.rows.length === 0) {
@@ -478,11 +586,12 @@ export class WatchlistController {
       const items = await tx.query<{
         ticker: string;
         section_name: string | null;
+        note: string | null;
         position: number;
         name: string | null;
         currency: string | null;
       }>(
-        `SELECT wi.ticker, wi.section_name, wi.position,
+        `SELECT wi.ticker, wi.section_name, wi.note, wi.position,
                 tm.name, tm.currency
            FROM watchlist_item wi
       LEFT JOIN ticker_meta tm ON tm.ticker = wi.ticker
@@ -505,6 +614,7 @@ export class WatchlistController {
       return {
         ticker: it.ticker,
         name: it.name ?? it.ticker,
+        note: it.note,
         sectionName: it.section_name,
         position: it.position,
         currentPrice: ltp.toFixed(4),
@@ -517,7 +627,9 @@ export class WatchlistController {
     return {
       id: data.wl.id,
       name: data.wl.name,
+      description: data.wl.description,
       market: data.wl.market,
+      marketSymbol: data.wl.market_symbol,
       sections: data.wl.sections ?? [],
       items,
     };
@@ -577,6 +689,39 @@ export class WatchlistController {
           WHERE id = $2 AND user_id = $3`,
         [name, id, userId],
       );
+    });
+  }
+
+  // ── Rename section ──────────────────────────────────────────────────────────
+  @Patch(':id/sections/:name')
+  @UsePipes(new ZodValidationPipe(RenameSectionDto))
+  async renameSection(
+    @Req() req: { user?: { id: string } },
+    @Param('id') id: string,
+    @Param('name') oldName: string,
+    @Body() dto: z.infer<typeof RenameSectionDto>,
+  ): Promise<{ sections: string[] }> {
+    if (!req.user) throw new UnauthorizedException();
+    const userId = req.user.id;
+    const newName = dto.newName.trim();
+    return this.db.withUserTx(userId, async (tx) => {
+      // Update the sections array: replace oldName with newName.
+      const r = await tx.query<{ sections: string[] }>(
+        `UPDATE watchlist
+            SET sections = array_replace(sections, $1, $2)
+          WHERE id = $3 AND user_id = $4
+          RETURNING sections`,
+        [oldName, newName, id, userId],
+      );
+      if (r.rows.length === 0) throw new UnauthorizedException('watchlist not found');
+      // Update all items in the old section to use the new name.
+      await tx.query(
+        `UPDATE watchlist_item
+            SET section_name = $1
+          WHERE watchlist_id = $2 AND section_name = $3 AND user_id = $4`,
+        [newName, id, oldName, userId],
+      );
+      return { sections: r.rows[0]!.sections };
     });
   }
 
@@ -778,14 +923,33 @@ export class WatchlistController {
       }
 
       await tx.query(
-        `INSERT INTO watchlist_item (user_id, watchlist_id, ticker, section_name, position)
-         VALUES ($1, $2, $3, $4, $5)
+        `INSERT INTO watchlist_item (user_id, watchlist_id, ticker, section_name, note, position)
+         VALUES ($1, $2, $3, $4, $5, $6)
          ON CONFLICT (watchlist_id, ticker) DO UPDATE
-            SET section_name = COALESCE(EXCLUDED.section_name, watchlist_item.section_name)`,
-        [userId, id, ticker, dto.sectionName ?? null, pos],
+            SET section_name = COALESCE(EXCLUDED.section_name, watchlist_item.section_name),
+                note = COALESCE(EXCLUDED.note, watchlist_item.note)`,
+        [userId, id, ticker, dto.sectionName ?? null, dto.note ?? null, pos],
       );
 
-      return { ticker, sectionName: dto.sectionName ?? null };
+      // Seed ticker_meta with the full name from the search result so the
+      // watchlist table shows the full name immediately (without waiting for
+      // the nightly enrichment job to run).  Only update if the row doesn't
+      // already have a name — the nightly job is authoritative once it runs.
+      if (dto.name?.trim()) {
+        await tx.query(
+          `INSERT INTO ticker_meta (ticker, name, meta_refreshed_at)
+           VALUES ($1, $2, NOW())
+           ON CONFLICT (ticker) DO UPDATE
+              SET name = CASE
+                           WHEN ticker_meta.name IS NULL OR ticker_meta.name = ticker_meta.ticker
+                           THEN EXCLUDED.name
+                           ELSE ticker_meta.name
+                         END`,
+          [ticker, dto.name.trim()],
+        );
+      }
+
+      return { ticker, sectionName: dto.sectionName ?? null, note: dto.note ?? null };
     });
   }
 
@@ -843,6 +1007,118 @@ export class WatchlistController {
           WHERE watchlist_id = $1 AND ticker = $2 AND user_id = $3`,
         [id, t, req.user!.id],
       );
+    });
+  }
+
+  // ── Bulk-move items to a section ──────────────────────────────────────────
+  @Post(':id/items/bulk-move-section')
+  @HttpCode(200)
+  async bulkMoveSectionItems(
+    @Req() req: { user?: { id: string } },
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ): Promise<{ updated: number }> {
+    if (!req.user) throw new UnauthorizedException();
+    const dto = z.object({
+      tickers: z.array(z.string().min(1)).min(1).max(500),
+      /** null = move to Ungrouped */
+      sectionName: z.string().min(1).max(80).nullable(),
+    }).safeParse(body);
+    if (!dto.success) throw new UnauthorizedException(dto.error.message);
+    const userId = req.user.id;
+    const tickers = dto.data.tickers.map((t) => t.toUpperCase());
+    const sectionName = dto.data.sectionName ?? null;
+    return this.db.withUserTx(userId, async (tx) => {
+      // If a target section was specified, auto-add it to the watchlist's
+      // sections[] so it appears in the UI even if it was newly created here.
+      if (sectionName) {
+        await tx.query(
+          `UPDATE watchlist
+              SET sections = CASE
+                               WHEN $1 = ANY(sections) THEN sections
+                               ELSE array_append(sections, $1)
+                             END
+            WHERE id = $2 AND user_id = $3`,
+          [sectionName, id, userId],
+        );
+      }
+      const r = await tx.query(
+        `UPDATE watchlist_item
+            SET section_name = $1
+          WHERE watchlist_id = $2 AND user_id = $3 AND ticker = ANY($4)`,
+        [sectionName, id, userId, tickers],
+      );
+      return { updated: r.rowCount ?? 0 };
+    });
+  }
+
+  // ── Bulk-delete items ──────────────────────────────────────────────────────
+  @Post(':id/items/bulk-delete')
+  @HttpCode(200)
+  @UsePipes(new ZodValidationPipe(BulkDeleteItemsDto))
+  async bulkDeleteItems(
+    @Req() req: { user?: { id: string } },
+    @Param('id') id: string,
+    @Body() dto: z.infer<typeof BulkDeleteItemsDto>,
+  ): Promise<{ deleted: number }> {
+    if (!req.user) throw new UnauthorizedException();
+    const userId = req.user.id;
+    const tickers = dto.tickers.map((t) => t.toUpperCase());
+    return this.db.withUserTx(userId, async (tx) => {
+      const r = await tx.query(
+        `DELETE FROM watchlist_item
+          WHERE watchlist_id = $1 AND user_id = $2 AND ticker = ANY($3)`,
+        [id, userId, tickers],
+      );
+      return { deleted: r.rowCount ?? 0 };
+    });
+  }
+
+  // ── Bulk-add items (move from another watchlist) ───────────────────────────
+  @Post(':id/items/bulk-add')
+  @HttpCode(200)
+  async bulkAddItems(
+    @Req() req: { user?: { id: string } },
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ): Promise<{ added: number }> {
+    if (!req.user) throw new UnauthorizedException();
+    const dto = z.object({
+      tickers: z.array(z.string().min(1)).min(1).max(500),
+      sourceWatchlistId: z.string().uuid().optional(),
+    }).safeParse(body);
+    if (!dto.success) throw new UnauthorizedException(dto.error.message);
+    const userId = req.user.id;
+    const tickers = dto.data.tickers.map((t) => t.toUpperCase());
+    return this.db.withUserTx(userId, async (tx) => {
+      // Get max position in target watchlist
+      const maxR = await tx.query<{ max: number | null }>(
+        `SELECT COALESCE(MAX(position), 0) AS max FROM watchlist_item WHERE watchlist_id = $1`,
+        [id],
+      );
+      let pos = (maxR.rows[0]!.max ?? 0) + 1;
+
+      let added = 0;
+      for (const ticker of tickers) {
+        const r = await tx.query(
+          `INSERT INTO watchlist_item (user_id, watchlist_id, ticker, position)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (watchlist_id, ticker) DO NOTHING`,
+          [userId, id, ticker, pos],
+        );
+        if ((r.rowCount ?? 0) > 0) { added++; pos++; }
+      }
+
+      // Remove from source watchlist if provided (move, not copy)
+      if (dto.data.sourceWatchlistId) {
+        await tx.query(
+          `DELETE FROM watchlist_item
+            WHERE watchlist_id = $1 AND user_id = $2 AND ticker = ANY($3)`,
+          [dto.data.sourceWatchlistId, userId, tickers],
+        );
+      }
+
+      return { added };
     });
   }
 }

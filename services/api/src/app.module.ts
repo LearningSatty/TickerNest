@@ -27,8 +27,14 @@ import { WatchlistController } from './watchlist/watchlist.controller';
 import { HealthController } from './health/health.controller';
 import { GatewayController } from './gateway/gateway.controller';
 import { GatewayService } from './gateway/gateway.service';
+import { NotesController } from './notes/notes.controller';
+import { NotesService } from './notes/notes.service';
+import { EventsController } from './events/events.controller';
+import { EventsService } from './events/events.service';
+import { YahooEventsService } from './events/yahoo-events.service';
 import { QuoteModule } from './quote/quote.module';
 import { RealtimeModule } from './realtime/realtime.module';
+import { SectorMasterController } from './sector/sector-master.controller';
 
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true }), DbModule, RealtimeModule, QuoteModule],
@@ -43,8 +49,11 @@ import { RealtimeModule } from './realtime/realtime.module';
     MarketController,
     SoldShareController,
     WatchlistController,
+    SectorMasterController,
     HealthController,
     GatewayController,
+    NotesController,
+    EventsController,
   ],
   providers: [
     JwksService,
@@ -62,6 +71,9 @@ import { RealtimeModule } from './realtime/realtime.module';
     ExcelImportService,
     PortfolioService,
     GatewayService,
+    NotesService,
+    EventsService,
+    YahooEventsService,
   ],
 })
 export class AppModule implements NestModule {

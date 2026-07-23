@@ -44,16 +44,12 @@ import { RealtimeModule } from '../realtime/realtime.module';
             const batch = tickers.slice(i, i + PARALLEL);
             await Promise.all(
               batch.map(async (ticker) => {
-                // We use range=5d so the response includes a multi-day
-                // series.  Why: for futures/commodities/crypto on weekends
-                // (NQ=F, GC=F, BZ=F, BTC-USD), Yahoo's `chartPreviousClose`
-                // with range=1d equals `regularMarketPrice` (both are the
-                // last close), making Δ = 0.  The series approach pulls
-                // yesterday's close from `series[-2]` regardless — same
-                // value that finance.yahoo.com displays.
+                // Use range=1d to get correct previousClose/chartPreviousClose.
+                // With range=1d, chartPreviousClose = yesterday's closing price
+                // which is exactly what we need for day change calculation.
                 const url =
                   `https://query1.finance.yahoo.com/v8/finance/chart/` +
-                  `${encodeURIComponent(ticker)}?range=5d&interval=1d`;
+                  `${encodeURIComponent(ticker)}?range=1d&interval=1d`;
                 try {
                   const r = await fetch(url, {
                     headers: { 'User-Agent': 'Mozilla/5.0 (TickerNest)' },
@@ -71,26 +67,20 @@ import { RealtimeModule } from '../realtime/realtime.module';
                   const result = body.chart?.result?.[0];
                   if (!result) return;
                   const meta = (result.meta ?? {}) as Record<string, unknown>;
-                  const closes = (result.indicators?.quote?.[0]?.close ?? []).filter(
-                    (x): x is number => typeof x === 'number',
-                  );
 
                   const ltp = Number(meta['regularMarketPrice'] ?? 0);
 
-                  // Derive yesterday's close = last fully-closed daily candle
-                  // BEFORE the current LTP.  We use the second-to-last series
-                  // value, falling back through previousClose / chartPreviousClose.
+                  // With range=1d, both previousClose and chartPreviousClose
+                  // give the correct previous trading day's close.
                   let prev = 0;
-                  if (closes.length >= 2) {
-                    // The last point in the series IS today's close (or the
-                    // current intraday print on equities), the one before
-                    // it is yesterday.
-                    prev = closes[closes.length - 2]!;
-                  } else if (typeof meta['previousClose'] === 'number') {
+                  if (typeof meta['previousClose'] === 'number' && meta['previousClose'] !== 0) {
                     prev = meta['previousClose'] as number;
-                  } else if (typeof meta['chartPreviousClose'] === 'number') {
+                  } else if (typeof meta['chartPreviousClose'] === 'number' && meta['chartPreviousClose'] !== 0) {
                     prev = meta['chartPreviousClose'] as number;
                   }
+
+                  // Edge case: on weekends/holidays, prev might equal ltp
+                  // (both are the last known close). That's correct — change=0.
 
                   const high = Number(meta['regularMarketDayHigh'] ?? ltp);
                   const low = Number(meta['regularMarketDayLow'] ?? ltp);

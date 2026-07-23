@@ -12,11 +12,13 @@
  * a chevron button on the right scrolls one viewport-worth.
  */
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { formatPct, formatMoney, formatSignedMoney, trendClass } from '@/lib/format';
+import { getMarketCards } from '@/pages/Settings';
+import type { MarketCard } from '@/pages/Settings';
 
 interface IndexQuote {
   ticker: string;
@@ -45,6 +47,19 @@ interface MarketStripProps {
   compact?: boolean;
 }
 
+/** Detail shape returned by GET /quotes/:ticker */
+interface StockDetail {
+  ticker: string;
+  longName: string;
+  shortName: string;
+  exchange: string;
+  currency: string;
+  currentPrice: number;
+  prevClose: number;
+  dayChange: number;
+  dayChangePct: number;
+}
+
 export default function MarketStrip({ compact = false }: MarketStripProps = {}) {
   const nav = useNavigate();
   const { data, isLoading } = useQuery({
@@ -53,6 +68,83 @@ export default function MarketStrip({ compact = false }: MarketStripProps = {}) 
     refetchInterval: 30_000,
     staleTime: 15_000,
   });
+
+  // Read user's enabled cards from settings (only show selected ones)
+  const enabledCards: MarketCard[] = useMemo(() => {
+    const cards = getMarketCards();
+    return cards.filter((c) => c.enabled);
+  }, [data]); // re-read on each data refresh to pick up settings changes
+
+  // Identify tickers that are NOT in the snapshot (custom user-added tickers)
+  const customTickers = useMemo(() => {
+    if (!data?.indices) return enabledCards.map((c) => c.ticker);
+    const snapshotSet = new Set(data.indices.map((ix) => ix.ticker));
+    return enabledCards
+      .map((c) => c.ticker)
+      .filter((t) => !snapshotSet.has(t));
+  }, [data, enabledCards]);
+
+  // Fetch individual quotes for custom tickers via /quotes/:ticker
+  const { data: customQuotes } = useQuery({
+    queryKey: ['market', 'custom-quotes', customTickers],
+    queryFn: async () => {
+      if (customTickers.length === 0) return {};
+      const results: Record<string, StockDetail> = {};
+      // Fetch in parallel (max 10 at a time to avoid flooding)
+      const batches = [];
+      for (let i = 0; i < customTickers.length; i += 10) {
+        batches.push(customTickers.slice(i, i + 10));
+      }
+      for (const batch of batches) {
+        const fetched = await Promise.allSettled(
+          batch.map((t) => api<StockDetail>(`/quotes/${encodeURIComponent(t)}`)),
+        );
+        fetched.forEach((r, idx) => {
+          if (r.status === 'fulfilled' && r.value) {
+            results[batch[idx]] = r.value;
+          }
+        });
+      }
+      return results;
+    },
+    enabled: customTickers.length > 0,
+    refetchInterval: 30_000,
+    staleTime: 15_000,
+  });
+
+  // Build a unified quote map: snapshot indices + custom fetched quotes
+  const quoteMap = useMemo(() => {
+    const m = new Map<string, IndexQuote>();
+    // From market snapshot
+    if (data?.indices) {
+      for (const ix of data.indices) {
+        m.set(ix.ticker, ix);
+      }
+    }
+    // From individual detail fetches (custom tickers)
+    if (customQuotes) {
+      for (const [ticker, detail] of Object.entries(customQuotes)) {
+        if (detail && !m.has(ticker)) {
+          const changePct = detail.prevClose === 0 ? 0 : detail.dayChange / detail.prevClose;
+          m.set(ticker, {
+            ticker: detail.ticker,
+            label: detail.shortName || detail.longName || ticker,
+            currentPrice: detail.currentPrice.toFixed(4),
+            prevClose: detail.prevClose.toFixed(4),
+            dayChange: detail.dayChange.toFixed(4),
+            dayChangePct: changePct.toFixed(6),
+            currency: detail.currency || 'INR',
+          });
+        }
+      }
+    }
+    return m;
+  }, [data, customQuotes]);
+
+  // Map enabled cards to their corresponding quotes (in user's chosen order)
+  const visibleIndices: (IndexQuote | null)[] = useMemo(() => {
+    return enabledCards.map((card) => quoteMap.get(card.ticker) ?? null);
+  }, [enabledCards, quoteMap]);
 
   const onPickIndex = (ticker: string) => {
     nav(`/stock/${encodeURIComponent(ticker)}`);
@@ -102,9 +194,12 @@ export default function MarketStrip({ compact = false }: MarketStripProps = {}) 
       <div className="flex-1 min-w-0 overflow-hidden">
         <div ref={scrollRef} className="overflow-x-auto no-scrollbar">
           <div className="flex divide-x divide-line/60 min-w-max">
-            {(data?.indices ?? Array.from({ length: 12 }, () => null)).map((ix, i) => (
+            {(isLoading && visibleIndices.length === 0
+              ? Array.from({ length: 12 }, () => null)
+              : visibleIndices
+            ).map((ix, i) => (
               <IndexCell
-                key={ix?.ticker ?? i}
+                key={ix?.ticker ?? `placeholder-${i}`}
                 ix={ix}
                 loading={isLoading}
                 compact={compact}

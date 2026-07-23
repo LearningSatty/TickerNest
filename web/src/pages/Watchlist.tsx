@@ -25,11 +25,13 @@ import {
 } from '@/lib/format';
 import TickerSearch, { Market, TickerSearchHandle } from '@/components/TickerSearch';
 import Modal from '@/components/Modal';
+import RichTextEditor, { RichTextDisplay } from '@/components/RichTextEditor';
 import WatchlistStockPane from '@/components/WatchlistStockPane';
 
 interface WatchlistItem {
   ticker: string;
   name: string;
+  note: string | null;
   sectionName: string | null;
   position: number;
   currentPrice: string;
@@ -41,7 +43,9 @@ interface WatchlistItem {
 interface WatchlistDetail {
   id: string;
   name: string;
-  market: 'IN' | 'US';
+  description: string | null;
+  market: 'IN' | 'US' | 'OTHER';
+  marketSymbol: string | null;
   sections: string[];
   items: WatchlistItem[];
 }
@@ -150,12 +154,122 @@ export default function Watchlist({ idOverride }: WatchlistProps = {}) {
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['watchlist', id] });
 
+  // All watchlists (for "move to" feature)
+  const { data: allWatchlists = [] } = useQuery({
+    queryKey: ['watchlists'],
+    queryFn: () => api<Array<{ id: string; name: string }>>('/watchlists'),
+    staleTime: 60_000,
+  });
+
+  // Multi-select state for bulk delete/move/copy
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [moveDropdownOpen, setMoveDropdownOpen] = useState(false);
+  const [moveSectionDropdownOpen, setMoveSectionDropdownOpen] = useState(false);
+  const [copyDropdownOpen, setCopyDropdownOpen] = useState(false);
+  const allTickers = data?.items.map((i) => i.ticker) ?? [];
+  const allSelected = allTickers.length > 0 && selected.size === allTickers.length;
+  const someSelected = selected.size > 0;
+  const toggleSelect = (ticker: string) => {
+    setSelected((s) => {
+      const next = new Set(s);
+      if (next.has(ticker)) next.delete(ticker); else next.add(ticker);
+      return next;
+    });
+  };
+  const toggleSelectAll = () => {
+    if (allSelected) setSelected(new Set());
+    else setSelected(new Set(allTickers));
+  };
+  // Close all dropdowns when selection is cleared
+  useEffect(() => {
+    if (selected.size === 0) {
+      setMoveDropdownOpen(false);
+      setMoveSectionDropdownOpen(false);
+      setCopyDropdownOpen(false);
+    }
+  }, [selected.size]);
+  // Note input for add-stock form
+  const [addNote, setAddNote] = useState('');
+
+  const bulkDeleteMut = useMutation({
+    mutationFn: (tickers: string[]) =>
+      api<{ deleted: number }>(`/watchlists/${id}/items/bulk-delete`, {
+        body: { tickers },
+      }),
+    onSuccess: () => {
+      setSelected(new Set());
+      invalidate();
+    },
+  });
+
+  const confirmBulkDelete = () => {
+    const count = selected.size;
+    if (count === 0) return;
+    if (confirm(`Delete ${count} stock${count > 1 ? 's' : ''} from this watchlist?`)) {
+      bulkDeleteMut.mutate([...selected]);
+    }
+  };
+
+  const moveToWatchlistMut = useMutation({
+    mutationFn: (vars: { targetWatchlistId: string; tickers: string[] }) =>
+      api(`/watchlists/${vars.targetWatchlistId}/items/bulk-add`, {
+        body: { tickers: vars.tickers, sourceWatchlistId: id },
+      }),
+    onSuccess: () => {
+      setSelected(new Set());
+      setMoveDropdownOpen(false);
+      invalidate();
+    },
+  });
+
+  const handleMoveTo = (targetId: string) => {
+    const tickers = [...selected];
+    if (tickers.length === 0) return;
+    moveToWatchlistMut.mutate({ targetWatchlistId: targetId, tickers });
+  };
+
+  const copyToWatchlistMut = useMutation({
+    mutationFn: (vars: { targetWatchlistId: string; tickers: string[] }) =>
+      api<{ added: number }>(`/watchlists/${vars.targetWatchlistId}/items/bulk-add`, {
+        body: { tickers: vars.tickers },
+      }),
+    onSuccess: () => {
+      setSelected(new Set());
+      setCopyDropdownOpen(false);
+    },
+  });
+
+  const handleCopyTo = (targetId: string) => {
+    const tickers = [...selected];
+    if (tickers.length === 0) return;
+    copyToWatchlistMut.mutate({ targetWatchlistId: targetId, tickers });
+  };
+
+  const moveToSectionMut = useMutation({
+    mutationFn: (vars: { sectionName: string | null; tickers: string[] }) =>
+      api(`/watchlists/${id}/items/bulk-move-section`, {
+        body: { tickers: vars.tickers, sectionName: vars.sectionName },
+      }),
+    onSuccess: () => {
+      setSelected(new Set());
+      setMoveSectionDropdownOpen(false);
+      invalidate();
+    },
+  });
+
+  const handleMoveToSection = (sectionName: string | null) => {
+    const tickers = [...selected];
+    if (tickers.length === 0) return;
+    moveToSectionMut.mutate({ sectionName, tickers });
+  };
+
   const addMut = useMutation({
-    mutationFn: (vars: { ticker: string; sectionName?: string }) =>
+    mutationFn: (vars: { ticker: string; name?: string; sectionName?: string; note?: string }) =>
       api(`/watchlists/${id}/items`, { body: vars }),
     onSuccess: () => {
       setPickedTicker(null);
       setPickedName('');
+      setAddNote('');
       // Keep the section selection — user is likely adding several stocks
       // to the same section in a row.
       invalidate();
@@ -199,6 +313,19 @@ export default function Watchlist({ idOverride }: WatchlistProps = {}) {
       }),
     onSuccess: invalidate,
   });
+  const renameSectionMut = useMutation({
+    mutationFn: (vars: { oldName: string; newName: string }) =>
+      api(`/watchlists/${id}/sections/${encodeURIComponent(vars.oldName)}`, {
+        method: 'PATCH',
+        body: { newName: vars.newName },
+      }),
+    onSuccess: invalidate,
+  });
+  const patchWatchlistMut = useMutation({
+    mutationFn: (vars: { name?: string; description?: string | null }) =>
+      api(`/watchlists/${id}`, { method: 'PATCH', body: vars }),
+    onSuccess: invalidate,
+  });
 
   // Group items by section name.  Map preserves insertion order — we seed
   // it with UNGROUPED_KEY first, then every section in user-defined order,
@@ -228,7 +355,9 @@ export default function Watchlist({ idOverride }: WatchlistProps = {}) {
     if (!pickedTicker) return;
     addMut.mutate({
       ticker: pickedTicker,
+      ...(pickedName && pickedName !== pickedTicker ? { name: pickedName } : {}),
       ...(sectionChoice ? { sectionName: sectionChoice } : {}),
+      ...(addNote.trim() ? { note: addNote.trim() } : {}),
     });
   };
 
@@ -251,13 +380,17 @@ export default function Watchlist({ idOverride }: WatchlistProps = {}) {
   return (
     <div className="p-6 space-y-4">
       <header className="flex items-end justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-xl font-semibold">{data.name}</h1>
+        <div className="space-y-1">
+          <WatchlistTitle name={data.name} onRename={(n) => patchWatchlistMut.mutate({ name: n })} />
           <p className="text-2xs text-ink-muted">
             {data.items.length} {data.items.length === 1 ? 'ticker' : 'tickers'} ·{' '}
             {data.sections.length} section{data.sections.length === 1 ? '' : 's'} ·
             live prices refresh every 10s
           </p>
+          <WatchlistDescription
+            description={data.description}
+            onSave={(desc) => patchWatchlistMut.mutate({ description: desc })}
+          />
         </div>
         <div className="flex items-center gap-3 flex-wrap">
           {/* + Section — moved up near the export/import controls so all
@@ -395,6 +528,7 @@ export default function Watchlist({ idOverride }: WatchlistProps = {}) {
             >
               <option value="IN">🇮🇳 Indian</option>
               <option value="US">🇺🇸 US</option>
+              <option value="OTHER">🌐 Other</option>
             </select>
           </div>
           <div className="flex-1 min-w-0 w-full">
@@ -473,6 +607,18 @@ export default function Watchlist({ idOverride }: WatchlistProps = {}) {
             {addMut.isPending ? 'Adding…' : 'Add to Watchlist'}
           </button>
         </div>
+        {/* Optional note — short reason for adding the stock */}
+        {pickedTicker && (
+          <div>
+            <input
+              value={addNote}
+              onChange={(e) => setAddNote(e.target.value)}
+              placeholder='Note (optional) — e.g. "Breakout above 200 DMA", "Q3 results beat"'
+              maxLength={200}
+              className="w-full bg-bg border border-line rounded-md px-3 py-1.5 text-xs focus:outline-none focus:border-accent"
+            />
+          </div>
+        )}
         {addMut.error && (
           <p className="text-2xs text-loss">{(addMut.error as Error).message}</p>
         )}
@@ -488,9 +634,140 @@ export default function Watchlist({ idOverride }: WatchlistProps = {}) {
         )}
       >
         <div className="card overflow-hidden">
+          {/* Bulk action bar */}
+          {data.items.length > 0 && (
+            <div className="px-3 py-2 border-b border-line/40 flex items-center gap-3 bg-bg-soft/40">
+              <label className="flex items-center gap-2 cursor-pointer text-xs text-ink-muted">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  ref={(el) => { if (el) el.indeterminate = someSelected && !allSelected; }}
+                  onChange={toggleSelectAll}
+                  className="w-3.5 h-3.5 rounded border-line accent-accent"
+                />
+                {someSelected ? `${selected.size} selected` : 'Select all'}
+              </label>
+              {someSelected && (
+                <div className="flex items-center gap-2">
+                  {/* Move to section dropdown */}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMoveSectionDropdownOpen((v) => !v);
+                        setMoveDropdownOpen(false);
+                        setCopyDropdownOpen(false);
+                      }}
+                      disabled={moveToSectionMut.isPending}
+                      className="px-2.5 py-1 rounded-md bg-accent/10 text-accent text-xs font-medium hover:bg-accent/20 disabled:opacity-50"
+                    >
+                      {moveToSectionMut.isPending ? 'Moving…' : `Move to section… ▾`}
+                    </button>
+                    {moveSectionDropdownOpen && (
+                      <div className="absolute top-full left-0 mt-1 bg-bg-soft border border-line rounded-md shadow-lg z-50 min-w-[180px] max-h-[200px] overflow-y-auto">
+                        <button
+                          onClick={() => handleMoveToSection(null)}
+                          className="w-full text-left px-3 py-1.5 text-xs hover:bg-line/40 text-ink-muted italic"
+                        >
+                          Ungrouped
+                        </button>
+                        {(data.sections ?? []).length > 0 && (
+                          <div className="border-t border-line/40" />
+                        )}
+                        {(data.sections ?? []).map((s) => (
+                          <button
+                            key={s}
+                            onClick={() => handleMoveToSection(s)}
+                            className="w-full text-left px-3 py-1.5 text-xs hover:bg-line/40 truncate"
+                          >
+                            {s}
+                          </button>
+                        ))}
+                        {(data.sections ?? []).length === 0 && (
+                          <p className="px-3 py-2 text-2xs text-ink-muted">No sections yet — create one first</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  {/* Move to watchlist dropdown */}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMoveDropdownOpen(!moveDropdownOpen);
+                        setMoveSectionDropdownOpen(false);
+                        setCopyDropdownOpen(false);
+                      }}
+                      disabled={moveToWatchlistMut.isPending}
+                      className="px-2.5 py-1 rounded-md bg-accent/10 text-accent text-xs font-medium hover:bg-accent/20 disabled:opacity-50"
+                    >
+                      {moveToWatchlistMut.isPending ? 'Moving…' : `Move to watchlist… ▾`}
+                    </button>
+                    {moveDropdownOpen && (
+                      <div className="absolute top-full left-0 mt-1 bg-bg-soft border border-line rounded-md shadow-lg z-50 min-w-[180px] max-h-[200px] overflow-y-auto">
+                        {allWatchlists.filter((w) => w.id !== id).map((w) => (
+                          <button
+                            key={w.id}
+                            onClick={() => handleMoveTo(w.id)}
+                            className="w-full text-left px-3 py-1.5 text-xs hover:bg-line/40 truncate"
+                          >
+                            {w.name}
+                          </button>
+                        ))}
+                        {allWatchlists.filter((w) => w.id !== id).length === 0 && (
+                          <p className="px-3 py-2 text-2xs text-ink-muted">No other watchlists</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  {/* Copy to watchlist dropdown */}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCopyDropdownOpen(!copyDropdownOpen);
+                        setMoveDropdownOpen(false);
+                        setMoveSectionDropdownOpen(false);
+                      }}
+                      disabled={copyToWatchlistMut.isPending}
+                      className="px-2.5 py-1 rounded-md bg-accent/10 text-accent text-xs font-medium hover:bg-accent/20 disabled:opacity-50"
+                    >
+                      {copyToWatchlistMut.isPending ? 'Copying…' : `Copy to watchlist… ▾`}
+                    </button>
+                    {copyDropdownOpen && (
+                      <div className="absolute top-full left-0 mt-1 bg-bg-soft border border-line rounded-md shadow-lg z-50 min-w-[180px] max-h-[200px] overflow-y-auto">
+                        {allWatchlists.filter((w) => w.id !== id).map((w) => (
+                          <button
+                            key={w.id}
+                            onClick={() => handleCopyTo(w.id)}
+                            className="w-full text-left px-3 py-1.5 text-xs hover:bg-line/40 truncate"
+                          >
+                            {w.name}
+                          </button>
+                        ))}
+                        {allWatchlists.filter((w) => w.id !== id).length === 0 && (
+                          <p className="px-3 py-2 text-2xs text-ink-muted">No other watchlists</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  {/* Delete */}
+                  <button
+                    type="button"
+                    onClick={confirmBulkDelete}
+                    disabled={bulkDeleteMut.isPending}
+                    className="px-2.5 py-1 rounded-md bg-loss/10 text-loss text-xs font-medium hover:bg-loss/20 disabled:opacity-50"
+                  >
+                    {bulkDeleteMut.isPending ? 'Deleting…' : `Delete ${selected.size}`}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
           <table className="table-pivot w-full">
             <thead>
               <tr>
+                <th className="w-8" />
                 <SortHeader
                   col="symbol"
                   label="Symbol"
@@ -527,7 +804,8 @@ export default function Watchlist({ idOverride }: WatchlistProps = {}) {
                   dir={sortDir}
                   onClick={onHeaderClick}
                 />
-                <th />
+                <th className="text-center text-2xs uppercase tracking-wide text-ink-muted font-medium w-10">Notes</th>
+                <th className="w-8" />
               </tr>
             </thead>
             <tbody>
@@ -537,6 +815,8 @@ export default function Watchlist({ idOverride }: WatchlistProps = {}) {
                     key={it.ticker}
                     item={it}
                     selected={selectedTicker === it.ticker}
+                    checked={selected.has(it.ticker)}
+                    onToggleCheck={() => toggleSelect(it.ticker)}
                     onSelect={(t) =>
                       setSelectedTicker((cur) => (cur === t ? null : t))
                     }
@@ -551,6 +831,8 @@ export default function Watchlist({ idOverride }: WatchlistProps = {}) {
                   selectedTicker={selectedTicker}
                   isDropTarget={dropTarget === key}
                   isDragging={!!dragTicker}
+                  checkedTickers={selected}
+                  onToggleCheck={toggleSelect}
                   onSelect={(t) =>
                     setSelectedTicker((cur) => (cur === t ? null : t))
                   }
@@ -581,13 +863,16 @@ export default function Watchlist({ idOverride }: WatchlistProps = {}) {
                         deleteSectionMut.mutate(key);
                       }
                     },
+                    onRenameSection: (newName: string) => {
+                      renameSectionMut.mutate({ oldName: key, newName });
+                    },
                   })}
                 />
               ))}
               {data.items.length === 0 &&
                 (groupBySection ? data.sections.length === 0 : true) && (
                   <tr>
-                    <td colSpan={5} className="text-center text-sm text-ink-muted py-6">
+                    <td colSpan={7} className="text-center text-sm text-ink-muted py-6">
                       Empty watchlist. Search for a stock above
                       {groupBySection ? ', or create a section to organise things.' : '.'}
                     </td>
@@ -668,6 +953,8 @@ function SectionBlock({
   selectedTicker,
   isDropTarget,
   isDragging,
+  checkedTickers,
+  onToggleCheck,
   onSelect,
   onDragStart,
   onDragEnd,
@@ -675,12 +962,15 @@ function SectionBlock({
   onDrop,
   onRemoveItem,
   onDeleteSection,
+  onRenameSection,
 }: {
   sectionKey: string;
   items: WatchlistItem[];
   selectedTicker: string | null;
   isDropTarget: boolean;
   isDragging: boolean;
+  checkedTickers: Set<string>;
+  onToggleCheck: (ticker: string) => void;
   onSelect: (ticker: string) => void;
   onDragStart: (ticker: string) => void;
   onDragEnd: () => void;
@@ -688,6 +978,7 @@ function SectionBlock({
   onDrop: (targetKey: string) => void;
   onRemoveItem: (ticker: string) => void;
   onDeleteSection?: () => void;
+  onRenameSection?: (newName: string) => void;
 }) {
   const isUngrouped = sectionKey === UNGROUPED_KEY;
   const empty = items.length === 0;
@@ -716,7 +1007,7 @@ function SectionBlock({
           className={dropClasses}
         >
           <td
-            colSpan={5}
+            colSpan={7}
             className={cn(
               'px-3 py-1.5 border-y border-line/40',
               isUngrouped
@@ -724,26 +1015,13 @@ function SectionBlock({
                 : 'bg-line/30 text-2xs uppercase tracking-wider text-ink-muted',
             )}
           >
-            <div className="flex items-center justify-between">
-              <span>
-                {isUngrouped ? 'UNGROUPED' : sectionKey}
-                {empty && !isUngrouped && (
-                  <span className="ml-2 text-2xs text-ink-muted/60">
-                    — drop a stock here
-                  </span>
-                )}
-              </span>
-              {onDeleteSection && (
-                <button
-                  type="button"
-                  onClick={onDeleteSection}
-                  className="text-2xs text-ink-muted hover:text-loss"
-                  title="Delete section"
-                >
-                  ✕ section
-                </button>
-              )}
-            </div>
+            <SectionHeader
+              name={isUngrouped ? 'UNGROUPED' : sectionKey}
+              isUngrouped={isUngrouped}
+              isEmpty={empty}
+              {...(onRenameSection ? { onRename: onRenameSection } : {})}
+              {...(onDeleteSection ? { onDelete: onDeleteSection } : {})}
+            />
           </td>
         </tr>
       )}
@@ -777,9 +1055,27 @@ function SectionBlock({
             selectedTicker === it.ticker && 'bg-accent/15',
           )}
         >
+          <td className="w-8 px-2">
+            <input
+              type="checkbox"
+              checked={checkedTickers.has(it.ticker)}
+              onChange={(e) => { e.stopPropagation(); onToggleCheck(it.ticker); }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-3.5 h-3.5 rounded border-line accent-accent cursor-pointer"
+            />
+          </td>
           <td>
-            <div className="text-sm truncate max-w-[280px]">{it.name}</div>
-            <div className="text-2xs text-ink-muted">{it.ticker}</div>
+            {(() => {
+              const displayName = it.name !== it.ticker ? it.name : it.ticker.replace(/\.(NS|BO)$/, '');
+              return (
+                <>
+                  <div className="text-sm font-medium">{displayName}</div>
+                  {it.ticker !== displayName && (
+                    <div className="text-2xs text-ink-muted">{it.ticker}</div>
+                  )}
+                </>
+              );
+            })()}
           </td>
           <td className="text-right num">
             {formatMoney(it.currentPrice, it.currency === 'USD' ? 'USD' : 'INR')}
@@ -792,6 +1088,18 @@ function SectionBlock({
           </td>
           <td className={cn('text-right num', trendClass(it.dayChangePct))}>
             {formatPct(it.dayChangePct)}
+          </td>
+          <td className="text-center">
+            {it.note ? (
+              <span className="relative group/note cursor-default" title={it.note}>
+                <span className="text-sm">📝</span>
+                <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 bg-bg-soft border border-line rounded text-2xs text-ink whitespace-nowrap max-w-[200px] truncate opacity-0 group-hover/note:opacity-100 pointer-events-none transition-opacity z-50">
+                  {it.note}
+                </span>
+              </span>
+            ) : (
+              <span className="text-ink-muted/30 text-sm">—</span>
+            )}
           </td>
           <td className="text-right">
             <button
@@ -857,11 +1165,15 @@ function SortHeader({
 function FlatRow({
   item: it,
   selected,
+  checked,
+  onToggleCheck,
   onSelect,
   onRemove,
 }: {
   item: WatchlistItem;
   selected: boolean;
+  checked: boolean;
+  onToggleCheck: () => void;
   onSelect: (ticker: string) => void;
   onRemove: (ticker: string) => void;
 }) {
@@ -873,9 +1185,27 @@ function FlatRow({
         selected && 'bg-accent/15',
       )}
     >
+      <td className="w-8 px-2">
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => { e.stopPropagation(); onToggleCheck(); }}
+          onClick={(e) => e.stopPropagation()}
+          className="w-3.5 h-3.5 rounded border-line accent-accent cursor-pointer"
+        />
+      </td>
       <td>
-        <div className="text-sm truncate max-w-[280px]">{it.name}</div>
-        <div className="text-2xs text-ink-muted">{it.ticker}</div>
+        {(() => {
+          const displayName = it.name !== it.ticker ? it.name : it.ticker.replace(/\.(NS|BO)$/, '');
+          return (
+            <>
+              <div className="text-sm font-medium">{displayName}</div>
+              {it.ticker !== displayName && (
+                <div className="text-2xs text-ink-muted">{it.ticker}</div>
+              )}
+            </>
+          );
+        })()}
       </td>
       <td className="text-right num">
         {formatMoney(it.currentPrice, it.currency === 'USD' ? 'USD' : 'INR')}
@@ -888,6 +1218,18 @@ function FlatRow({
       </td>
       <td className={cn('text-right num', trendClass(it.dayChangePct))}>
         {formatPct(it.dayChangePct)}
+      </td>
+      <td className="text-center">
+        {it.note ? (
+          <span className="relative group/note cursor-default" title={it.note}>
+            <span className="text-sm">📝</span>
+            <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 bg-bg-soft border border-line rounded text-2xs text-ink whitespace-nowrap max-w-[200px] truncate opacity-0 group-hover/note:opacity-100 pointer-events-none transition-opacity z-50">
+              {it.note}
+            </span>
+          </span>
+        ) : (
+          <span className="text-ink-muted/30 text-sm">—</span>
+        )}
       </td>
       <td className="text-right">
         <button
@@ -902,5 +1244,209 @@ function FlatRow({
         </button>
       </td>
     </tr>
+  );
+}
+
+// ─── Editable watchlist title ────────────────────────────────────────────────
+function WatchlistTitle({ name, onRename }: { name: string; onRename: (n: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(name);
+  useEffect(() => { setVal(name); }, [name]);
+  const commit = () => {
+    const trimmed = val.trim();
+    if (trimmed && trimmed !== name) onRename(trimmed);
+    setEditing(false);
+  };
+  if (editing) {
+    return (
+      <input
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') commit();
+          if (e.key === 'Escape') { setVal(name); setEditing(false); }
+        }}
+        autoFocus
+        className="text-xl font-semibold bg-bg border border-accent rounded px-2 py-0.5 focus:outline-none w-full max-w-md"
+      />
+    );
+  }
+  return (
+    <h1
+      className="text-xl font-semibold cursor-pointer hover:text-accent group inline-flex items-center gap-2"
+      onClick={() => setEditing(true)}
+      title="Click to rename"
+    >
+      {name}
+      <span className="text-xs text-ink-muted opacity-0 group-hover:opacity-100 transition-opacity">✏️</span>
+    </h1>
+  );
+}
+
+// ─── Watchlist description (click to open rich text editor modal) ─────────────
+function WatchlistDescription({
+  description,
+  onSave,
+}: {
+  description: string | null;
+  onSave: (desc: string | null) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [val, setVal] = useState(description ?? '');
+  useEffect(() => { setVal(description ?? ''); }, [description]);
+
+  const commit = () => {
+    const trimmed = val.trim();
+    // Treat empty or just <p></p> as null
+    const isEmpty = !trimmed || trimmed === '<p></p>' || trimmed === '<p><br></p>';
+    onSave(isEmpty ? null : trimmed);
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <Modal
+        open
+        onClose={() => setEditing(false)}
+        title="Edit Description"
+        size="lg"
+        footer={
+          <>
+            <button type="button" onClick={() => { setVal(description ?? ''); setEditing(false); }} className="px-3 py-1.5 rounded-md border border-line text-xs hover:bg-line/40">
+              Cancel
+            </button>
+            <button type="button" onClick={commit} className="px-3 py-1.5 rounded-md bg-accent text-white text-xs hover:bg-accent/90">
+              Save
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <p className="text-2xs text-ink-muted">
+            Add notes, YouTube links (auto-embedded), images, and formatted text.
+          </p>
+          <RichTextEditor
+            content={val}
+            onChange={setVal}
+            placeholder="Describe this watchlist — add notes, YouTube links, images…"
+            compact={false}
+          />
+        </div>
+      </Modal>
+    );
+  }
+
+  if (!description) {
+    return (
+      <button
+        type="button"
+        onClick={() => setEditing(true)}
+        className="text-2xs text-ink-muted hover:text-accent mt-0.5"
+      >
+        + Add description
+      </button>
+    );
+  }
+
+  return (
+    <div className="mt-1 max-w-2xl group/desc relative">
+      <div className={cn(!expanded && 'line-clamp-3 overflow-hidden')}>
+        <RichTextDisplay html={description} className="text-xs" embedMedia={expanded} />
+      </div>
+      {!expanded && (
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="text-2xs text-accent hover:underline mt-0.5"
+        >
+          More
+        </button>
+      )}
+      {expanded && (
+        <button
+          type="button"
+          onClick={() => setExpanded(false)}
+          className="text-2xs text-accent hover:underline mt-0.5"
+        >
+          Less
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={() => setEditing(true)}
+        className="absolute top-0 right-0 text-[10px] text-ink-muted hover:text-accent opacity-0 group-hover/desc:opacity-100 transition-opacity bg-bg/80 rounded px-1.5 py-0.5"
+        title="Edit description"
+      >
+        ✏️ Edit
+      </button>
+    </div>
+  );
+}
+
+// ─── Section header (editable name + delete) ─────────────────────────────────
+function SectionHeader({
+  name,
+  isUngrouped,
+  isEmpty,
+  onRename,
+  onDelete,
+}: {
+  name: string;
+  isUngrouped: boolean;
+  isEmpty: boolean;
+  onRename?: (newName: string) => void;
+  onDelete?: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(name);
+  const commit = () => {
+    const trimmed = val.trim();
+    if (trimmed && trimmed !== name && onRename) onRename(trimmed);
+    setEditing(false);
+  };
+  if (editing) {
+    return (
+      <div className="flex items-center gap-2">
+        <input
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commit();
+            if (e.key === 'Escape') { setVal(name); setEditing(false); }
+          }}
+          onClick={(e) => e.stopPropagation()}
+          autoFocus
+          className="bg-bg border border-accent rounded px-2 py-0 text-2xs uppercase tracking-wider focus:outline-none"
+        />
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center justify-between">
+      <span className="group/sec inline-flex items-center gap-1">
+        {name}
+        {isEmpty && !isUngrouped && (
+          <span className="ml-2 text-2xs text-ink-muted/60">— drop a stock here</span>
+        )}
+        {onRename && !isUngrouped && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setVal(name); setEditing(true); }}
+            className="text-[10px] text-ink-muted hover:text-ink opacity-0 group-hover/sec:opacity-100 transition-opacity ml-1"
+            title="Rename section"
+          >
+            ✏️
+          </button>
+        )}
+      </span>
+      {onDelete && (
+        <button type="button" onClick={onDelete} className="text-2xs text-ink-muted hover:text-loss" title="Delete section">
+          ✕ section
+        </button>
+      )}
+    </div>
   );
 }

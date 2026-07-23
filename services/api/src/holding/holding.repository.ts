@@ -15,9 +15,11 @@ import {
 } from './holding.upsert';
 
 export interface HoldingRowDb {
+  id: string;
   user_id: string;
   broker_id: string;
-  ticker: string;
+  source_ticker: string;
+  resolved_ticker: string;
   qty: string;       // pg returns NUMERIC as string
   avg_cost: string;
   created_at: Date;
@@ -42,7 +44,7 @@ export class HoldingRepository {
       const r = await tx.query<HoldingRowDb>(
         `SELECT * FROM holding
           WHERE user_id = $1 AND broker_id = $2
-          ORDER BY ticker`,
+          ORDER BY resolved_ticker`,
         [userId, brokerId],
       );
       return r.rows;
@@ -125,7 +127,7 @@ export class HoldingRepository {
       }
 
       // 5. Record idempotency in same TX.
-      const recordId = result ? `${result.user_id}:${result.broker_id}:${result.ticker}` : '';
+      const recordId = result ? `${result.user_id}:${result.broker_id}:${result.resolved_ticker}` : '';
       await this.idem.record(
         userId, idempotencyKey, recordId, 'PUT /holdings', tx,
       );

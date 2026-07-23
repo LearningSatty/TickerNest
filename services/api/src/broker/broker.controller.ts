@@ -16,21 +16,16 @@ import { z } from 'zod';
 import { ZodValidationPipe } from '../common/zod.pipe';
 import { BrokerRepository } from './broker.repository';
 
-const CSV_KEYS = [
-  'icici-direct', 'iifl', 'groww', 'kite', 'angelone',
-  'ind-money', 'mstock', 'custom',
-] as const;
-
 const CreateBrokerDto = z.object({
   name: z.string().min(1).max(40),
   displayName: z.string().min(1).max(80),
   currency: z.enum(['INR', 'USD']).default('INR'),
-  csvProfileKey: z.enum(CSV_KEYS).default('custom'),
+  exchangeDefault: z.enum(['NSE', 'BSE', 'NASDAQ', 'NYSE']).default('NSE'),
 });
 const UpdateBrokerDto = z.object({
   displayName: z.string().min(1).max(80).optional(),
   currency: z.enum(['INR', 'USD']).optional(),
-  csvProfileKey: z.enum(CSV_KEYS).optional(),
+  exchangeDefault: z.enum(['NSE', 'BSE', 'NASDAQ', 'NYSE']).optional(),
   sortOrder: z.number().int().nonnegative().optional(),
 });
 
@@ -82,13 +77,13 @@ export class BrokerController {
   }
 }
 
-function toApi(r: { id: string; name: string; display_name: string; currency: string; sort_order: number; csv_profile_key: string }) {
+function toApi(r: { id: string; name: string; display_name: string; currency: string; sort_order: number; exchange_default: string }) {
   return {
     id: r.id,
     name: r.name,
     displayName: r.display_name,
     currency: r.currency,
     sortOrder: r.sort_order,
-    csvProfileKey: r.csv_profile_key,
+    exchangeDefault: r.exchange_default,
   };
 }

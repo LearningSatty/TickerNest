@@ -5,7 +5,7 @@ import androidx.room.PrimaryKey
 
 /**
  * Local cache. NOT a source of truth — only the last server snapshot, used so
- * the broker page and consolidated pivot render instantly on cold launch.
+ * screens render instantly on cold launch without a network round-trip.
  */
 
 @Entity(tableName = "consolidated_row")
@@ -50,5 +50,62 @@ data class BrokerHoldingEntity(
     val currentPrice: String?,
     val prevClose: String?,
     val peRatio: String?,
+    val cachedAt: Long,
+)
+
+@Entity(tableName = "sold_share")
+data class SoldShareEntity(
+    @PrimaryKey val id: String,
+    val brokerId: String,
+    val ticker: String,
+    val name: String?,
+    val qty: String,
+    val costBasisAtSell: String,
+    val soldPrice: String?,
+    val reason: String?,
+    val mistake: String?,
+    val soldAt: String,
+    val cachedAt: Long,
+)
+
+// ── Watchlist entities ────────────────────────────────────────────────────────
+
+@Entity(tableName = "watchlist")
+data class WatchlistEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val description: String?,
+    val market: String,
+    val marketSymbol: String?,
+    val groupId: String?,
+    val isPinned: Boolean,
+    val itemCount: Int,
+    val position: Int,
+    val cachedAt: Long,
+)
+
+/** One row = one item inside a watchlist (with live quote data). */
+@Entity(tableName = "watchlist_item", primaryKeys = ["watchlistId", "ticker"])
+data class WatchlistItemEntity(
+    val watchlistId: String,
+    val ticker: String,
+    val name: String,
+    val note: String?,
+    val sectionName: String?,
+    val position: Int,
+    val currentPrice: String,
+    val prevClose: String,
+    val dayChange: String,
+    val dayChangePct: String,
+    val currency: String,
+    val cachedAt: Long,
+)
+
+/** Sections list stored as a single row per watchlist (comma-separated is brittle;
+ *  we store them ordered in a JSON array string instead). */
+@Entity(tableName = "watchlist_sections")
+data class WatchlistSectionsEntity(
+    @PrimaryKey val watchlistId: String,
+    val sectionsJson: String, // JSON array of section name strings
     val cachedAt: Long,
 )
