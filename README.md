@@ -48,3 +48,19 @@ total   : 21 suites · 134 tests
 
 ## REDIS HEALTH
 http://localhost:3000/healthz 
+
+
+## Deployment:
+Your local dev setup already connects to a real, live, hosted Supabase project (not a local DB) — so your holdings/watchlist/broker data is already in the cloud. Pointing production at that same Supabase project means your existing login and data just work — no export/import needed.
+
+
+##Deployment stack (already scaffolded in the repo, just needs executing):
+- Supabase — Postgres + Auth (reuse existing project)
+- Upstash — Redis (quote cache)
+- Fly.io — API (NestJS + WebSocket), fly.toml/Dockerfile already exist
+- Vercel — Web (React/Vite), vercel.json already exists
+- There's even a DEPLOY.md in the repo walking through this exact path, plus CI workflows that auto-deploy on main push.
+
+##Scope: core app only (services/api + web) — the mf/intl/physical/onboarding microservices are unfinished per the repo's own notes, so they're excluded. Noted a couple of cosmetic gaps this causes (inert "coming soon" nav tabs, one broken onboarding wizard link) that aren't blockers.
+
+##Steps: verify Supabase migrations are applied → provision Upstash → fly deploy the API with secrets pointing at your existing Supabase project → vercel deploy the web app with matching env vars → confirm CORS/WEB_ORIGIN alignment → smoke-test by logging in with your existing account and confirming real data shows up.
