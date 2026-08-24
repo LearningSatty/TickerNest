@@ -45,6 +45,10 @@ android : 3 suites  ·  20 tests
 total   : 21 suites · 134 tests
 ```
 
+## Start api and web
+Run below command from TickerNest directory:
+    npm run dev:api
+    npm run dev:web
 
 ## REDIS HEALTH
 http://localhost:3000/healthz 
